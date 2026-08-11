@@ -2,17 +2,17 @@
 
 # id_x_007: SME IAO 活动报名系统
 
-**咨询主题发布 → 时段排期 → 学生报名 → 邮件提醒 → 取消与反馈 → 数据导出 的全流程预约闭环**
-
-![编号](https://img.shields.io/static/v1?label=%E7%BC%96%E5%8F%B7&message=id_x_007&color=lightgray&style=flat-square&labelColor=black)
-![协议](https://img.shields.io/static/v1?label=%E5%8D%8F%E8%AE%AE&message=GPL--3.0&color=lightgray&style=flat-square&labelColor=black)
-![作者](https://img.shields.io/static/v1?label=%E4%BD%9C%E8%80%85&message=rayzha%40cuhk.edu.cn&color=lightgray&style=flat-square&labelColor=black)
-![组织](https://img.shields.io/static/v1?label=%E7%BB%84%E7%BB%87&message=CUHK--SZ%20SME%20CDC&color=lightgray&style=flat-square&labelColor=black)
-![引擎](https://img.shields.io/static/v1?label=%E5%BC%95%E6%93%8E&message=Litestar%20%2B%20Next.js&color=lightgray&style=flat-square&labelColor=black)
+![编号](https://img.shields.io/static/v1?label=%E7%BC%96%E5%8F%B7&message=007&color=lightgray&style=flat-square&labelColor=black)
+![协议](https://img.shields.io/static/v1?label=%E5%8D%8F%E8%AE%AE&message=AGPL-3.0&color=lightgray&style=flat-square&labelColor=black)
+![作者](https://img.shields.io/static/v1?label=%E4%BD%9C%E8%80%85&message=IT&color=lightgray&style=flat-square&labelColor=black)
+![组织](https://img.shields.io/static/v1?label=%E7%BB%84%E7%BB%87&message=SME&color=lightgray&style=flat-square&labelColor=black)
+![引擎](https://img.shields.io/static/v1?label=%E5%BC%95%E6%93%8E&message=Litestar%20%2F%20React&color=lightgray&style=flat-square&labelColor=black)
 ![语言](https://img.shields.io/static/v1?label=%E8%AF%AD%E8%A8%80&message=Python%20%2F%20TypeScript&color=lightgray&style=flat-square&labelColor=black)
-![数据库](https://img.shields.io/static/v1?label=%E6%95%B0%E6%8D%AE%E5%BA%93&message=PostgreSQL&color=lightgray&style=flat-square&labelColor=black)
+![数据库](https://img.shields.io/static/v1?label=%E6%95%B0%E6%8D%AE%E5%BA%93&message=PostgreSQL-18&color=lightgray&style=flat-square&labelColor=black)
 
 </div>
+
+**咨询主题发布 → 时段排期 → 人员预约 → 邮件提醒 → 取消与反馈 → 数据导出 的全流程预约闭环**
 
 ## 一、项目背景与目标
 
@@ -26,11 +26,11 @@
 
 ### 1.2 建设目标
 
-构建一套线上化的「一对一预约平台」，实现 **咨询主题发布 → 时段排期 → 学生报名 → 邮件提醒 → 取消与反馈 → 数据汇总导出** 的全流程闭环，让三类角色各取所需、各得其所。
+构建一套线上化的「一对一预约平台」，实现 **咨询主题发布 → 时段排期 → 人员预约 → 邮件提醒 → 取消与反馈 → 数据汇总导出** 的全流程闭环，让三类角色各取所需、各得其所。
 
-### 1.3 交付定位
+### 1.3 系统定位
 
-本次汇报所涉系统已上线试运行，覆盖学生端与管理端双端，并打通 CUHK 统一身份认证（SSO）与校园邮件触达链路。
+本次汇报所涉的系统，覆盖学生端与管理端双端，并打通 CUHK 统一身份认证（SSO）与校园邮件触达链路。
 
 ---
 
@@ -55,7 +55,7 @@
 
 ## 三、功能拆解
 
-按用户使用旅程，将本次交付拆解为 8 个功能模块。
+按用户使用旅程，将本系统拆解为 8 个功能模块。
 
 ### 3.1 模块 A · 登录与认证
 
@@ -120,7 +120,7 @@
 
 ## 四、核心业务规则
 
-业务规则集中可审计，是本次交付的「产品契约」。
+业务规则集中可审计，是本次研发任务的「产品契约」。
 
 ### 4.1 时间规则
 
@@ -193,9 +193,9 @@
 
 ---
 
-## 七、交付价值小结
+## 七、系统价值
 
-本次交付实现「三个升级」：
+本次研发任务实现「三个升级」：
 
 1. **学生侧**：把"对接"从邮件 / 微信沟通升级为自助式在线预约，降低协调成本。
 2. **管理侧**：将人工登记表升级为结构化数据，支持批量排期与一键导出，提升运营效率。

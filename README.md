@@ -2,26 +2,26 @@
 
 # id_x_007: SME IAO 活动报名系统
 
-**咨询主题发布 → 时段排期 → 学生报名 → 邮件提醒 → 取消与反馈 → 数据导出 的全流程预约闭环**
-
-![编号](https://img.shields.io/static/v1?label=%E7%BC%96%E5%8F%B7&message=id_x_007&color=lightgray&style=flat-square&labelColor=black)
-![协议](https://img.shields.io/static/v1?label=%E5%8D%8F%E8%AE%AE&message=GPL--3.0&color=lightgray&style=flat-square&labelColor=black)
-![作者](https://img.shields.io/static/v1?label=%E4%BD%9C%E8%80%85&message=rayzha%40cuhk.edu.cn&color=lightgray&style=flat-square&labelColor=black)
-![组织](https://img.shields.io/static/v1?label=%E7%BB%84%E7%BB%87&message=CUHK--SZ%20SME%20CDC&color=lightgray&style=flat-square&labelColor=black)
-![引擎](https://img.shields.io/static/v1?label=%E5%BC%95%E6%93%8E&message=Litestar%20%2B%20Next.js&color=lightgray&style=flat-square&labelColor=black)
+![编号](https://img.shields.io/static/v1?label=%E7%BC%96%E5%8F%B7&message=007&color=lightgray&style=flat-square&labelColor=black)
+![协议](https://img.shields.io/static/v1?label=%E5%8D%8F%E8%AE%AE&message=AGPL-3.0&color=lightgray&style=flat-square&labelColor=black)
+![作者](https://img.shields.io/static/v1?label=%E4%BD%9C%E8%80%85&message=IT&color=lightgray&style=flat-square&labelColor=black)
+![组织](https://img.shields.io/static/v1?label=%E7%BB%84%E7%BB%87&message=SME&color=lightgray&style=flat-square&labelColor=black)
+![引擎](https://img.shields.io/static/v1?label=%E5%BC%95%E6%93%8E&message=Litestar%20%2F%20React&color=lightgray&style=flat-square&labelColor=black)
 ![语言](https://img.shields.io/static/v1?label=%E8%AF%AD%E8%A8%80&message=Python%20%2F%20TypeScript&color=lightgray&style=flat-square&labelColor=black)
-![数据库](https://img.shields.io/static/v1?label=%E6%95%B0%E6%8D%AE%E5%BA%93&message=PostgreSQL&color=lightgray&style=flat-square&labelColor=black)
+![数据库](https://img.shields.io/static/v1?label=%E6%95%B0%E6%8D%AE%E5%BA%93&message=PostgreSQL-18&color=lightgray&style=flat-square&labelColor=black)
 
 </div>
 
+**咨询主题发布 → 时段排期 → 学生报名 → 邮件提醒 → 取消与反馈 → 数据导出 的全流程预约闭环**
+
 ---
 
-## ⚫ 1. 简介 (Introduction)
+## 1. 简介 (Introduction)
 
 - **Slogan**: 为经管学院「国际事务办公室」提供线上化的一对一咨询预约能力。
 - **Description**: 本系统面向香港中文大学（深圳）经济管理学院「1v1咨询」预约平台，覆盖**咨询主题发布 → 时段排期 → 学生报名 → 邮件提醒 → 取消与反馈 → 数据汇总导出**的全流程闭环。学生侧将"找校友咨询"从邮件 / 微信沟通升级为自助式在线预约；管理侧将人工登记表升级为结构化数据，支持批量排期与一键导出；顾问侧通过邮件自动触达，无需登录即可掌握预约动态。系统采用前后端分离架构：后端基于 **Litestar** 异步框架，对外仅暴露单一 **GraphQL** 端点；前端基于 **React + Next.js + Tailwind CSS**，提供学生端与管理端两套布局；流量入口由 **HAProxy** 承担负载均衡与反向代理。
 
-## ⚫ 2. 核心特性 (Features)
+## 2. 核心特性 (Features)
 
 - 双端分离：学生端（CUHK ADFS 单点登录，首次登录自动建档）与管理端（账号密码登录）共用同一站点、两套布局。
 - 活动浏览：列表视图 + 日历视图（周/月/日切换），按 Open / Full / Closed 状态着色。
@@ -29,7 +29,7 @@
 - 管理后台：咨询项目维护（富文本、名额、顾问）、活动单条创建 / Excel 批量排期上传、报名明细查看。
 - 数据导出：按时间区间 + 活动名多选导出 Excel，底部表格联动实时刷新报名明细。
 
-## ⚫ 3. 项目亮点 (Highlights)
+## 3. 项目亮点 (Highlights)
 
 1. **全流程业务闭环** —— 从主题发布、排期、报名、提醒、取消到反馈问卷与数据导出，一个系统覆盖预约业务全部环节，无需人工干预中间流程。
 2. **单端点 GraphQL 契约** —— 全部业务经 `POST /b/id_x_007/graphql` 统一收发，Query / Mutation 强类型 Schema 描述，前后端以 `ResponseType(code, message, data)` 统一响应封装，接口演进无路径碎片化。
@@ -39,7 +39,7 @@
 6. **异步高性能后端** —— Litestar + SQLAlchemy 异步会话与连接池（pool_size=32、pool_recycle=360、pool_pre_ping），支撑大文件上传上限配置。
 7. **负载均衡高可用** —— HAProxy 作为统一入口，承担 SSL 终止、健康检查与多实例后端轮询分发，支持无状态横向扩容。
 
-## ⚫ 4. 技术栈 (Tech Stack)
+## 4. 技术栈 (Tech Stack)
 
 表 4-1 技术栈一览
 
@@ -59,7 +59,7 @@
 | 负载均衡 | HAProxy | 2.x | SSL 终止、健康检查、反向代理 |
 | 运维组件 | Supervisor / cron | — | 进程守护、定时邮件 |
 
-## ⚫ 5. 整体架构图 (Overall Architecture Diagram)
+## 5. 整体架构图 (Overall Architecture Diagram)
 
 ```mermaid
 graph TD
@@ -100,7 +100,7 @@ graph TD
     VIEW -->|报名 / 取消通知| SMTP
 ```
 
-## ⚫ 6. 请求流转图 (Request Flow Diagram)
+## 6. 请求流转图 (Request Flow Diagram)
 
 ```mermaid
 sequenceDiagram
@@ -136,7 +136,7 @@ sequenceDiagram
     end
 ```
 
-## ⚫ 7. 目录结构 (Directory Structure)
+## 7. 目录结构 (Directory Structure)
 
 ```text
 id_x_007/                         # 模型根目录
@@ -175,7 +175,7 @@ id_x_007/                         # 模型根目录
 └── requirements.txt              # Python 依赖清单
 ```
 
-## ⚫ 8. API 接口文档 (API Documentation)
+## 8. API 接口文档 (API Documentation)
 
 - 统一端点：`POST https://<HOST>/b/id_x_007/graphql`
 - 所有操作均为 GraphQL Query / Mutation；请求体 `{"query": "...", "variables": {"input": {...}}}`。
@@ -236,7 +236,7 @@ curl -X POST "<BASE_URL>/b/id_x_007/graphql" \
   }'
 ```
 
-## ⚫ 9. 快速部署 (Quick Deploy)
+## 9. 快速部署 (Quick Deploy)
 
 ### 环境准备 (Prerequisites)
 
