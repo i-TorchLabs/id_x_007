@@ -1,6 +1,6 @@
 <div align="center">
 
-# id_x_007: SME IAO 活动报名系统
+# id_x_007: SME IAO 活动预约系统
 
 ![编号](https://img.shields.io/static/v1?label=%E7%BC%96%E5%8F%B7&message=007&color=lightgray&style=flat-square&labelColor=black)
 ![协议](https://img.shields.io/static/v1?label=%E5%8D%8F%E8%AE%AE&message=AGPL-3.0&color=lightgray&style=flat-square&labelColor=black)
@@ -12,14 +12,14 @@
 
 </div>
 
-**咨询主题发布 → 时段排期 → 学生报名 → 邮件提醒 → 取消与反馈 → 数据导出 的全流程预约闭环**
+**咨询主题发布 → 时段排期 → 人员预约 → 邮件提醒 → 取消与反馈 → 数据导出 的全流程预约闭环**
 
 ---
 
 ## 1. 简介 (Introduction)
 
 - **Slogan**: 为经管学院「国际事务办公室」提供线上化的一对一咨询预约能力。
-- **Description**: 本系统面向香港中文大学（深圳）经济管理学院「1v1咨询」预约平台，覆盖**咨询主题发布 → 时段排期 → 学生报名 → 邮件提醒 → 取消与反馈 → 数据汇总导出**的全流程闭环。学生侧将"找校友咨询"从邮件 / 微信沟通升级为自助式在线预约；管理侧将人工登记表升级为结构化数据，支持批量排期与一键导出；顾问侧通过邮件自动触达，无需登录即可掌握预约动态。系统采用前后端分离架构：后端基于 **Litestar** 异步框架，对外仅暴露单一 **GraphQL** 端点；前端基于 **React + Next.js + Tailwind CSS**，提供学生端与管理端两套布局；流量入口由 **HAProxy** 承担负载均衡与反向代理。
+- **Description**: 本系统面向香港中文大学（深圳）经济管理学院「1v1咨询」预约平台，覆盖**咨询主题发布 → 时段排期 → 人员预约 → 邮件提醒 → 取消与反馈 → 数据汇总导出**的全流程闭环。学生侧将"找校友咨询"从邮件 / 微信沟通升级为自助式在线预约；管理侧将人工登记表升级为结构化数据，支持批量排期与一键导出；顾问侧通过邮件自动触达，无需登录即可掌握预约动态。系统采用前后端分离架构：后端基于 **Litestar** 异步框架，对外仅暴露单一 **GraphQL** 端点；前端基于 **React + Next.js + Tailwind CSS**，提供学生端与管理端两套布局；流量入口由 **HAProxy** 承担负载均衡与反向代理。
 
 ## 2. 核心特性 (Features)
 
