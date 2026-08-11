@@ -98,6 +98,14 @@ graph TD
     CRON -->|读取排期与报名| PG
     CRON -->|SMTP 发信| SMTP
     VIEW -->|报名 / 取消通知| SMTP
+
+    classDef blackText color:#000;
+    class STU,ADM,HAP,API,CTRL,VIEW,MODEL,PG,SSO,SMTP,CRON blackText;
+    style 客户端 color:#000
+    style 负载均衡层 color:#000
+    style 应用层 color:#000
+    style 数据层 color:#000
+    style 外部依赖 color:#000
 ```
 
 ## 6. 请求流转图 (Request Flow Diagram)
