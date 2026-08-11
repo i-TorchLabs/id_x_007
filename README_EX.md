@@ -1,5 +1,18 @@
-# SME IAO 预约系统 · 设计概要
----
+<div align="center">
+
+# id_x_007: SME IAO 活动报名系统
+
+**咨询主题发布 → 时段排期 → 学生报名 → 邮件提醒 → 取消与反馈 → 数据导出 的全流程预约闭环**
+
+![编号](https://img.shields.io/static/v1?label=%E7%BC%96%E5%8F%B7&message=id_x_007&color=lightgray&style=flat-square&labelColor=black)
+![协议](https://img.shields.io/static/v1?label=%E5%8D%8F%E8%AE%AE&message=GPL--3.0&color=lightgray&style=flat-square&labelColor=black)
+![作者](https://img.shields.io/static/v1?label=%E4%BD%9C%E8%80%85&message=rayzha%40cuhk.edu.cn&color=lightgray&style=flat-square&labelColor=black)
+![组织](https://img.shields.io/static/v1?label=%E7%BB%84%E7%BB%87&message=CUHK--SZ%20SME%20CDC&color=lightgray&style=flat-square&labelColor=black)
+![引擎](https://img.shields.io/static/v1?label=%E5%BC%95%E6%93%8E&message=Litestar%20%2B%20Next.js&color=lightgray&style=flat-square&labelColor=black)
+![语言](https://img.shields.io/static/v1?label=%E8%AF%AD%E8%A8%80&message=Python%20%2F%20TypeScript&color=lightgray&style=flat-square&labelColor=black)
+![数据库](https://img.shields.io/static/v1?label=%E6%95%B0%E6%8D%AE%E5%BA%93&message=PostgreSQL&color=lightgray&style=flat-square&labelColor=black)
+
+</div>
 
 ## 一、项目背景与目标
 
