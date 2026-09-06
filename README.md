@@ -101,6 +101,8 @@ graph TD
     VIEW -->|预约 / 取消通知| SMTP
 ```
 
+<p align="center">图 5-1 整体架构图</p>
+
 ## 6. 请求流转图 (Request Flow Diagram)
 
 ```mermaid
@@ -136,6 +138,8 @@ sequenceDiagram
         end
     end
 ```
+
+<p align="center">图 6-1 请求流转图</p>
 
 ## 7. 目录结构 (Directory Structure)
 
@@ -234,14 +238,14 @@ curl -X POST "<BASE_URL>/b/id_x_007/graphql" \
 
 ## 9. 快速部署 (Quick Deploy)
 
-### 环境准备 (Prerequisites)
+### 9.1 环境准备 (Prerequisites)
 
 - Python 3.11+（建议 conda 虚拟环境）
 - Node.js 20+ 与 npm
 - PostgreSQL 12+
 - HAProxy、Supervisor、cron（生产环境）
 
-### 安装 (Installation)
+### 9.2 安装 (Installation)
 
 ```bash
 # 后端依赖
@@ -253,7 +257,7 @@ cd web
 npm install
 ```
 
-### 运行 (Run)
+### 9.3 运行 (Run)
 
 ```bash
 # 后端（GraphQL 端点 /b/id_x_007/graphql，数据库凭据经环境变量加密注入）
@@ -267,7 +271,7 @@ npm run dev
 npm run build
 ```
 
-### 生产部署 (可选)
+### 9.4 生产部署 (可选)
 
 - **Supervisor**：配置进程守护托管后端进程（含 `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` 加密环境变量）。
 - **HAProxy**：使用 `ops/haproxy.cfg`，SSL 终止于 HAProxy；`/b/id_x_007/graphql` 经健康检查（`option httpchk`）后轮询分发至多个后端实例，示例：
