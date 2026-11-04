@@ -87,7 +87,7 @@ if ! podman container exists "${PLUGIN}_haproxy"; then
         -e SERVICE_HOST=127.0.0.1 \
         -e WEB_HOST=127.0.0.1 \
         -v "${OPS_DIR}/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro" \
-        docker.io/library/haproxy:3.2
+        docker.io/library/haproxy:3.0
 fi
 
 echo "启动完成: http://localhost:${HOST_PORT}"

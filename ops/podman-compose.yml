@@ -69,7 +69,7 @@ services:
       - service
 
   haproxy:
-    image: docker.io/library/haproxy:3.2
+    image: docker.io/library/haproxy:3.0
     container_name: id_x_007_haproxy
     restart: unless-stopped
     volumes:

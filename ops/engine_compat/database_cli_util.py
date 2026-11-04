@@ -1,32 +1,31 @@
 # -*- coding: utf-8 -*-
 # id_x_007 容器部署版（ops/engine_compat）：镜像构建时覆盖宿主的 DM8 实现，
 # 对外接口（DatabaseClient / load_module_db_config / build_module_db_clients）保持不变，
-# 连接串改为 PostgreSQL（psycopg2，同步模式）。
+# 连接串改为 PostgreSQL。
+# 与宿主契约一致：async_config 必须返回 SQLAlchemyAsyncConfig（asyncpg 异步引擎）——
+# main.py 的 _startup_module_db 以 `async with engine.connect()` 探活，
+# x_plugin.set_session_maker 也从异步引擎 URL 派生 psycopg2 同步引擎；
+# 若返回同步配置会在启动时抛 AttributeError: __aenter__。
 import os
 from urllib.parse import quote_plus
 
-# 注意：必须使用 advanced_alchemy.extensions.litestar 下的 SQLAlchemySyncConfig
-# （Litestar 插件配置），它提供 engine_app_state_key / session_maker_app_state_key
+# 注意：必须使用 advanced_alchemy.extensions.litestar 下的插件配置类，
+# 它提供 engine_app_state_key / session_maker_app_state_key
 # / engine_dependency_key / session_dependency_key 等关键字参数。
-# 切勿改回 advanced_alchemy.config.sync.SQLAlchemySyncConfig —— 那是裸配置基类，
-# 不接受上述参数，会抛 TypeError: ... got an unexpected keyword argument
-# 'engine_app_state_key'。
+# 切勿改用 advanced_alchemy.config 下的裸配置基类——不接受上述参数，
+# 会抛 TypeError: ... got an unexpected keyword argument 'engine_app_state_key'。
 # 同理 EngineConfig / SQLAlchemyPlugin 也从 advanced_alchemy.extensions.litestar
 # 引入：litestar.plugins.sqlalchemy 自 litestar 2.18 起已弃用，3.0 将移除。
+from advanced_alchemy.config.asyncio import AsyncSessionConfig
 from advanced_alchemy.extensions.litestar import (
     EngineConfig,
+    SQLAlchemyAsyncConfig,
     SQLAlchemyPlugin,
-    SQLAlchemySyncConfig,
 )
 from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from dotenv import dotenv_values
-
-try:  # advanced-alchemy 版本兼容：旧版称 SessionConfig，新版称 SyncSessionConfig
-    from advanced_alchemy.config.sync import SessionConfig as _SyncSessionConfig
-except ImportError:  # pragma: no cover
-    from advanced_alchemy.config.sync import SyncSessionConfig as _SyncSessionConfig
 
 from .config_parse_util import load_toml_config
 from .decrypt_util import decrypt
@@ -147,15 +146,19 @@ class DatabaseClient:
 
     @property
     def async_conn_string(self) -> str:
-        """兼容入口：容器内统一走同步 psycopg2，返回与 sync_conn_string 相同的连接串。"""
-        return self.sync_conn_string
+        """PostgreSQL 连接串（asyncpg 驱动，异步模式，与宿主一致）。"""
+        self._validate()
+        return (
+            f"postgresql+asyncpg://{quote_plus(self._db_username)}:{quote_plus(self._db_password)}"
+            f"@{self._db_host}:{self._db_port}/{self._db_name}"
+        )
 
     def db_config(self):
         self._validate()
         return {
             "SQLALCHEMY_TRACK_MODIFICATIONS": True,
             "CONN_STRING": self.sync_conn_string,
-            "ASYNC_CONN_STRING": self.sync_conn_string,
+            "ASYNC_CONN_STRING": self.async_conn_string,
             "DATABASE": {
                 "host": self._db_host,
                 "port": self._db_port,
@@ -176,16 +179,12 @@ class DatabaseClient:
         )
 
     def async_config(self, name: str = "db", metadata=None):
-        """返回同步 SQLAlchemy 配置（与宿主同步契约一致）。
-
-        方法名保留 async_config 以兼容 main.py 调用约定，
-        但实际返回的是 SQLAlchemySyncConfig（同步配置）。
-        """
-        config = SQLAlchemySyncConfig(
-            connection_string=self.sync_conn_string,
+        """返回异步 SQLAlchemy 配置（asyncpg，与宿主契约一致）。"""
+        config = SQLAlchemyAsyncConfig(
+            connection_string=self.async_conn_string,
             metadata=metadata,
             engine_config=EngineConfig(**POOL_DEFAULTS),
-            session_config=_SyncSessionConfig(expire_on_commit=False),
+            session_config=AsyncSessionConfig(expire_on_commit=False),
             engine_app_state_key=f"{name}_engine",
             session_maker_app_state_key=f"{name}_session_maker",
             engine_dependency_key=f"{name}_db_engine",
