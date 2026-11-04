@@ -1,0 +1,68 @@
+/** 顾问管理页文案（advisorManagement 命名空间） */
+export default {
+  // 搜索栏
+  keyword: "关键词",
+  keywordPlaceholder: "姓名 / 用户名 / 专业",
+  search: "搜索",
+  add: "新增",
+  // 顾问列表表头
+  columns: {
+    username: "用户名",
+    name: "姓名",
+    email: "邮箱",
+    grade: "年级",
+    major: "专业",
+    direction: "方向",
+    status: "状态",
+    accepting: "接受预约",
+    slots: "时段数",
+    appointments: "预约数",
+    options: "操作",
+  },
+  advisorListAria: "顾问列表",
+  dataTableAria: "数据表格",
+  noData: "暂无数据",
+  // 状态标签
+  enabled: "启用",
+  disabled: "停用",
+  yes: "是",
+  no: "否",
+  // 通用按钮
+  edit: "编辑",
+  delete: "删除",
+  cancel: "取消",
+  submit: "提交",
+  // 新增/编辑弹窗
+  editTitle: "编辑顾问",
+  addTitle: "新增顾问",
+  fields: {
+    username: "用户名",
+    name: "姓名",
+    email: "邮箱",
+    grade: "年级",
+    major: "专业",
+    direction: "方向",
+    bio: "简介",
+    photo: "照片",
+    enabled: "启用",
+    accepting: "接受预约",
+  },
+  bioPlaceholder: "顾问简介",
+  uploadPhoto: "上传（最大 3MB）",
+  photoAlt: "预览",
+  remove: "移除",
+  noPhoto: "暂无照片",
+  // 删除确认
+  deleteConfirmTitle: "确认删除",
+  deleteConfirmBody: "删除顾问“{name}”？存在预约记录的顾问无法删除。",
+  // 提示文案
+  loadFail: "数据加载失败。",
+  photoTooLarge: "照片大小不能超过 3MB。",
+  photoReadFail: "照片读取失败。",
+  usernameRequired: "请填写用户名。",
+  nameRequired: "请填写姓名。",
+  saved: "保存成功。",
+  saveFail: "保存失败。",
+  deleted: "删除成功。",
+  deleteFail: "删除失败。",
+} as const;

@@ -1,0 +1,48 @@
+/** Admin appointment management strings (appointmentManagement namespace) */
+export default {
+  // Filters & toolbar
+  filterAdvisor: "Advisor",
+  allAdvisors: "All Advisors",
+  dateLabel: "Date",
+  filterState: "State",
+  stateAll: "All States",
+  stateBooked: "Booked",
+  stateCompleted: "Completed",
+  stateCancelledStudent: "Cancelled (student)",
+  stateCancelledAdvisor: "Cancelled (advisor)",
+  exportButton: "Export",
+  // Table
+  ariaAppointmentList: "Appointment list",
+  ariaDataTable: "Data table",
+  colApplyNo: "Apply No.",
+  colAdvisor: "Advisor",
+  colStudent: "Student",
+  colTime: "Time",
+  colTopic: "Topic",
+  colMode: "Mode",
+  colState: "State",
+  colOptions: "Options",
+  empty: "No data",
+  modeOnline: "Online",
+  modeOffline: "Offline",
+  // Action buttons
+  detail: "Detail",
+  close: "Close",
+  // Detail modal
+  detailTitle: "Appointment Detail",
+  detailApplyNo: "Apply No.",
+  detailAdvisor: "Advisor",
+  detailStudent: "Student",
+  detailTime: "Time",
+  detailTopic: "Topic",
+  detailContent: "Content",
+  detailMode: "Mode",
+  detailPhone: "Phone",
+  detailWechat: "WeChat",
+  detailMeetingLink: "Meeting Link",
+  detailCancelReason: "Cancel Reason",
+  detailCreatedAt: "Created At",
+  // Toasts
+  loadFailed: "Fail to load data.",
+  exportFailed: "Fail to export.",
+} as const;

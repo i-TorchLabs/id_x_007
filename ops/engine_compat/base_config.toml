@@ -1,0 +1,23 @@
+# id_x_007 容器内基础配置：镜像构建时覆盖 config/base_config.toml
+# 仅加载 id_x_007 插件；数据库连接参数由容器环境变量注入（见 ops/up.sh / podman-compose.yml）
+[BASE]
+LISTEN_ADDRESS = "0.0.0.0"
+LISTEN_PORT = "7000"
+DEBUG_MODE = false
+SECRET_KEY = "bW9vbmxhYg=="
+PROJECT_PATH = "/app/i-Core"
+MAX_REQUEST_BODY_SIZE = 1073741824
+
+[LOG]
+INFO_LOG_PATH = "logs/info.log"
+WARN_LOG_PATH = "logs/warn.log"
+ERROR_LOG_PATH = "logs/error.log"
+
+[EXTEND]
+MODELS = [
+    ["id_x_007", "/id_x_007"],
+]
+
+[DATABASE]
+# 容器内使用 PostgreSQL；DB_HOST/DB_PORT/DB_NAME/DB_USERNAME/DB_PASSWORD 由环境变量注入
+DB_TYPE = "postgresql"

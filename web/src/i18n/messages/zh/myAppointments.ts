@@ -1,0 +1,23 @@
+/** 我的预约页文案（myAppointments 命名空间） */
+export default {
+  tableLabel: "我的预约",
+  dataTableLabel: "数据表格",
+  colApplyNo: "申请编号",
+  colAdvisor: "顾问",
+  colTime: "时间",
+  colTopic: "主题",
+  colMode: "方式",
+  colState: "状态",
+  colCreateTime: "创建时间",
+  colActions: "操作",
+  noData: "暂无数据",
+  cancel: "取消",
+  confirmCancelTitle: "确认取消",
+  confirmCancelBody:
+    "确认取消与 {advisorName} 的预约（申请编号 {applyNo}）吗？预约仅可在开始前至少 4 小时取消。",
+  back: "返回",
+  confirm: "确认",
+  failToLoad: "数据加载失败。",
+  cancelled: "预约已取消。",
+  failToCancel: "取消失败。",
+} as const;

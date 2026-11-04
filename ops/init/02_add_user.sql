@@ -1,0 +1,8 @@
+-- id_x_007 预置数据（首启执行，跟随 01_init.sql）
+--
+-- 初始管理员 admin 由引擎启动时播种（x_plugin.build_tables -> seed_initial_admin）：
+-- 无 admin 角色用户时插入 username=admin，口令取环境变量 PA_ADMIN_PASSWORD
+-- （默认 admin123），以 PBKDF2 哈希落库，因此本文件无需插入管理员账号。
+--
+-- 朋辈顾问账号请登录管理后台「顾问管理」创建（role=advisor，经 CUHK SSO 登录）；
+-- 学生账号由首次 SSO 登录自动建档，无需预置。

@@ -1,296 +1,367 @@
 <div align="center">
 
-# id_x_007: SME UGO 朋辈顾问系统
+# id_x_007: UGO 朋辈顾问咨询预约系统（Peer Advisor Appointment）
 
-**顾问展示 → 时段排期 → 预约报名 → 邮件通知 → 取消与反馈 → 数据导出 的全流程咨询闭环**
+**把"找朋辈顾问咨询"从邮件/微信沟通，升级为自助式在线预约闭环**
 
-![编号](https://img.shields.io/static/v1?label=%E7%BC%96%E5%8F%B7&message=007&color=red&style=flat-square&labelColor=gray)
-![协议](https://img.shields.io/static/v1?label=%E5%8D%8F%E8%AE%AE&message=AGPL-3.0&color=red&style=flat-square&labelColor=gray)
-![作者](https://img.shields.io/static/v1?label=%E4%BD%9C%E8%80%85&message=IT&color=red&style=flat-square&labelColor=gray)
-![组织](https://img.shields.io/static/v1?label=%E7%BB%84%E7%BB%87&message=SME&color=red&style=flat-square&labelColor=gray)
-![引擎](https://img.shields.io/static/v1?label=%E5%BC%95%E6%93%8E&message=Litestar%20%2F%20React&color=red&style=flat-square&labelColor=gray)
-![语言](https://img.shields.io/static/v1?label=%E8%AF%AD%E8%A8%80&message=Python%20%2F%20TypeScript&color=red&style=flat-square&labelColor=gray)
-![数据库](https://img.shields.io/static/v1?label=%E6%95%B0%E6%8D%AE%E5%BA%93&message=PostgreSQL-18&color=red&style=flat-square&labelColor=gray)
+![ID](https://img.shields.io/static/v1?label=ID&message=007&color=C3272B&style=for-the-badge&labelColor=555)
+![License](https://img.shields.io/static/v1?label=License&message=AGPL-3.0&color=C3272B&style=for-the-badge&labelColor=555)
+![Author](https://img.shields.io/static/v1?label=Author&message=Ray&color=C3272B&style=for-the-badge&labelColor=555)
+![Org](https://img.shields.io/static/v1?label=Org&message=TorchLabs&color=C3272B&style=for-the-badge&labelColor=555)
+![Engine](https://img.shields.io/static/v1?label=Engine&message=Litestar&color=C3272B&style=for-the-badge&labelColor=555)
 
 </div>
 
 ---
 
-## 1. 简介 (Introduction)
+## 1 简介 (Introduction)
 
-- **Slogan**: 为经管学院朋辈顾问咨询项目提供线上化的一对一咨询预约能力。
-- **Description**: 本系统覆盖**顾问信息展示 → 时段排期 → 预约报名 → 邮件通知 → 取消与反馈 → 数据汇总导出**的全流程闭环。学生侧将"找朋辈顾问咨询"从邮件 / 微信沟通升级为自助式在线预约，降低协调成本；管理侧将人工登记表升级为结构化数据，支持批量排期与一键导入 / 导出，提升运营效率；顾问侧可通过系统自主排期，并实时查看个人预约情况。系统采用前后端分离架构：后端基于 **Litestar** 异步框架，对外仅暴露单一 **GraphQL** 端点；前端基于 **React + Next.js + Tailwind CSS**，提供学生端、顾问端与管理端三套布局。
+**Slogan**：为经管学院「朋辈顾问咨询（Peer Advisor, PA）」项目提供顾问展示、时段排期、预约报名、邮件通知、取消与反馈、数据汇总导出的一站式线上平台。
 
-## 2. 核心特性 (Features)
+**Description**：本项目覆盖**顾问建档 → 排期发布（单条/批量导入）→ 学生浏览与预约 → 邮件通知与每日提醒 → 取消/完成/反馈 → 统计分析与 Excel 导出**的完整业务闭环。学生与朋辈顾问经 CUHK 统一身份认证（Single Sign-On, SSO）登录，首次登录自动建档，无需注册；管理员以账号密码登录后台，维护顾问档案、代管排期并掌握全量预约、反馈与邮件数据。
 
-- 三端分离：学生端与顾问端（CUHK 统一身份认证 SSO 登录，首次登录自动建档）与管理端（账号密码登录）共用同一站点、三套布局。
-- 顾问展示：顾问卡片展示照片、姓名、年级、专业、擅长方向与简介，支持按专业 / 擅长方向筛选，卡片联动近期可预约时段。
-- 预约报名：四步流程（选顾问 → 选时段 → 填咨询信息 → 提交确认），线上 / 线下两种咨询形式表单联动校验。
-- 排期管理：批量 Excel 模板上传与单个时段增删改并行，支持时段暂停 / 恢复与"暂不接待"隐藏。
-- 数据闭环：咨询完成后顾问填写反馈总结（仅管理员与顾问可见），管理端提供统计分析与 Excel 导出。
+与人工登记表或邮件协调相比，本系统的优势在于：
 
-## 3. 项目亮点 (Highlights)
+- 时间规则内建：报名截止（咨询开始前 24 小时）、学生/顾问取消截止（开始前 4 小时）等规则均由服务端强制执行；
+- 名额并发安全：预约提交对时段行加锁（`SELECT ... FOR UPDATE`）后校验名额与重复预约，杜绝并发超订；
+- 通知全程留痕：预约成功、取消、每日提醒三类邮件全部落库 `pa_email_log`（含 skipped/failed 状态），管理端可查可审计；
+- 以插件形式接入 i-Core 宿主框架（实现 `PluginInterface`，懒加载内部模块），与其他业务模块共享数据库会话与日志基础设施。
 
-1. **全流程业务闭环** —— 从顾问展示、排期、预约、提醒、取消到反馈总结与数据导出，一个系统覆盖朋辈咨询业务全部环节。
-2. **单端点 GraphQL 契约** —— 全部业务经 `POST /b/id_x_007/graphql` 统一收发，Query / Mutation 强类型 Schema 描述，前后端以 `ResponseType(code, message, data)` 统一响应封装。
-3. **三角色权限矩阵** —— 学生 / 朋辈顾问 / 管理员三类角色能力边界清晰：SSO 与账号密码双认证通道，顾问自助排期，管理员全量管控。
-4. **精细表单联动** —— 线上咨询：电话必填 + 微信号必填 + 会议链接选填；线下咨询：电话必填 + 微信号选填 + 会议链接置灰，规则随选项实时切换。
-5. **精细业务规则** —— 报名截止于咨询开始前 24 小时，学生与顾问双方均在开始前 4 小时内禁止取消，取消必填原因并双向邮件通知。
-6. **定时邮件自动化** —— cron 脚本驱动顾问提醒与学生提醒（每日 21:00 检查次日预约），预约成功、取消通知即时双向触达，管理员可查阅发送记录。
-7. **运营数据可度量** —— 管理端统计总预约数、完成数、取消数与各顾问咨询量排名，支持预约明细与反馈汇总双 Excel 导出。
+## 2 核心特性 (Features)
 
-## 4. 技术栈 (Tech Stack)
+- **学生端自助预约**：按专业/擅长方向筛选浏览顾问卡片（照片、年级、专业、擅长方向、简介、近期可约时段），选时段填写咨询表单（主题/内容/线上线下方式/电话/微信/会议链接，表单按方式联动校验），一键生成预约单号（`A` + 8 位数字）；开始前 4 小时外可自助取消。
+- **顾问端排期管理**：单条增删改、暂停/恢复时段、名额控制（默认 1 人）、xlsx 模板下载与批量导入（逐行校验并返回成功/失败行报告）、「暂不接待」整体开关；预约处理支持取消（必填原因）、标记完成与填写咨询反馈（总结/处理方式/是否跟进，仅顾问与管理员可见）。
+- **管理端全量运营**：顾问账号与档案管理、任意顾问排期代管、全量预约/反馈查询与 Excel 导出（可按顾问/月份过滤）、运营统计（总量/完成/取消/进行中 + 顾问咨询量排名）、邮件日志查看与邮件模板在线配置。
+- **邮件通知闭环**：预约成功/取消即时通知双方；每天 21:00（Asia/Shanghai）自动扫描次日预约并向双方发送提醒；SMTP 未配置时自动降级为仅落库不发送，上线后可补查。
+- **双通道登录**：学生/顾问走 CUHK SSO（ADFS OAuth2 授权码流，首次登录自动建档）；管理员账号密码登录（RSA-2048 加密传输 + PBKDF2 口令哈希 + 防爆破验证码）。
 
-<p align="center">表 4-1 技术栈一览</p>
+## 3 项目亮点 (Highlights)
+
+1. **预约并发安全** —— 预约与取消均对 `pa_slot` 行执行 `with_for_update()` 行级锁后再校验名额/重复预约并增减 `booked` 计数，从数据库层面杜绝并发超订，优于"实时 count 对比 quota"的无锁方案。
+2. **库表驱动的邮件模板** —— 三类通知（booked/cancelled/reminder）的主题与正文 HTML 存于 `pa_mail_template` 表，支持 `{apply_no}`、`{advisor_name}` 等占位符，管理员可在线修改文案而无需改码发版；模板缺失或渲染异常时自动回退内置默认模板，通知链路永不中断。
+3. **邮件可靠性工程** —— 业务数据先 `commit` 后发信（避免"邮件已发但事务回滚"）；邮件头经 CR/LF 清洗防注入；发送结果以 sent/failed/skipped 三态全量落库 `pa_email_log` 并记录错误摘要；通知失败不阻断预约/取消主流程。
+4. **进程内定时调度防重入** —— 每日 21:00 提醒由 asyncio 后台任务驱动，执行前抢占 PostgreSQL 咨询锁（`pg_try_advisory_lock(775200721)`），多 worker/多实例部署下保证提醒不重发；`PA_SCHEDULER_DISABLED=1` 可按实例关闭。
+5. **SSO 安全接入** —— ADFS OAuth2 授权码流在服务端以 `client_secret` 换取并验签 `id_token`（含防重放 nonce 校验），前端全程不接触 IdP 凭据；登录成功后签发系统独立会话 Token，与 IdP token 完全隔离。
+6. **GraphQL 安全闭环** —— Schema 层启用 `DisableIntrospection`（关闭内省）与 `QueryDepthLimiter(max_depth=8)`（防深层嵌套 DoS）；路由层禁用 GraphiQL IDE、仅接受 POST 查询，杜绝 GET 直达与缓存投毒。
+7. **凭证零前端暴露** —— 管理员登录口令经服务端下发的 RSA-2048 公钥（OAEP-SHA256）加密后提交，私钥仅存服务端内存；口令以 PBKDF2-HMAC-SHA256（10 万次迭代 + 随机盐）落库；连续失败触发图形验证码与账号锁定，恒定哈希比较防用户名枚举。
+8. **可审计的取消语义** —— 取消预约不物理删除记录，而是置 `cancelled_student` / `cancelled_advisor` 状态并保留取消原因，统计与导出口径完整可追溯。
+
+## 4 技术栈 (Tech Stack)
+
+<p align="center"><b>表1 技术栈一览</b></p>
 
 | 分类 | 名称 | 版本 | 用途 |
-|------|------|------|------|
-| 编程语言 | Python / TypeScript | 3.11+ / 5.x | 后端服务 / 前端开发 |
-| 后端框架 | Litestar | 2.x | 异步 Web 框架（GraphQL 单端点） |
-| API 规范 | GraphQL（Strawberry） | — | Query / Mutation 强类型契约 |
-| ORM | SQLAlchemy | 2.x | PostgreSQL 异步数据访问与连接池 |
-| 数据处理 | pandas / openpyxl / xlsxwriter | 2.x / 3.x | 批量排期解析与报表导出 |
-| 前端框架 | React / Next.js | 19 / 16 | 服务端渲染单页应用与路由 |
-| 样式体系 | Tailwind CSS | 4.x | 原子化样式与主题变量 |
-| 构建工具 | Next.js（Turbopack） | — | 前端构建与类型检查 |
-| 数据库 | PostgreSQL | 12+ | 业务数据存储 |
-| 负载均衡 | HAProxy | 2.x | SSL 终止、健康检查、反向代理 |
-| 运维组件 | Supervisor / cron | — | 进程守护、定时邮件 |
+| --- | --- | --- | --- |
+| 编程语言 | Python | 3.10 | 后端服务 |
+| 编程语言 | TypeScript | 5.x | 前端应用 |
+| 核心框架 | Litestar + Strawberry GraphQL | — | GraphQL API 服务 |
+| 核心框架 | Next.js / React | 16.x / 19.x | 前端 App Router 应用 |
+| UI 组件 | HeroUI + Tailwind CSS | 3.x / 4.x | 组件库与样式 |
+| 数据库 | PostgreSQL | 18 | 业务数据存储（pa_* 七张业务表） |
+| ORM | SQLAlchemy（sync） | 2.0 | 同步数据访问（与宿主 DB 契约桥接） |
+| 数据处理 | openpyxl + pandas | — | 排期批量导入、预约/反馈 Excel 导出 |
+| 认证 | ADFS OAuth2（授权码流） | — | CUHK SSO 学生/顾问登录 |
+| 安全 | cryptography + PBKDF2 | — | RSA 登录加密、口令哈希 |
+| 邮件 | smtplib（STARTTLS） | — | 预约/取消/提醒通知 |
+| 接入层 | HAProxy | 3.2 | 反向代理、路由分发、安全头 |
+| 构建/运维 | Podman + podman-compose + uv | — | 容器构建、编排与依赖安装 |
 
-## 5. 整体架构图 (Overall Architecture Diagram)
+## 5 整体架构图 (Overall Architecture Diagram)
 
 ```mermaid
 graph TD
-    subgraph 客户端
-        STU[学生端 Next.js SPA<br/>SSO 登录 / 浏览顾问 / 预约 / 取消]
-        ADV[顾问端 Next.js SPA<br/>SSO 登录 / 排期 / 预约管理 / 反馈]
-        ADM[管理端 Next.js SPA<br/>账号密码登录 / 顾问管理 / 统计导出]
+    subgraph Client["客户端"]
+        Student["学生浏览器"]
+        Advisor["朋辈顾问浏览器"]
+        Admin["管理员浏览器"]
     end
 
-    subgraph 负载均衡层
-        HAP[HAProxy<br/>SSL 终止 / 健康检查 / 轮询分发]
+    subgraph IdP["外部依赖"]
+        ADFS["CUHK ADFS (OAuth2)"]
+        SMTP["SMTP 邮件服务"]
     end
 
-    subgraph 应用层
-        API[Litestar 后端<br/>GraphQL 端点 /b/id_x_007/graphql]
-        CTRL[controllers.py 操作分发]
-        VIEW[views.py 业务处理]
-        MODEL[models.py ORM 映射]
+    subgraph Gateway["接入层"]
+        HAProxy["HAProxy :8080 (宿主机 :8005)"]
     end
 
-    subgraph 数据层
-        PG[(PostgreSQL<br/>顾问 / 排期 / 预约 /<br/>反馈 / 邮件记录)]
+    subgraph Frontend["前端层 web :2000"]
+        Next["Next.js App Router<br/>f/007/user 学生端<br/>f/007/advisor 顾问端<br/>f/007/admin 管理后台<br/>f/007/oauth2 SSO 回调"]
     end
 
-    subgraph 外部依赖
-        SSO[CUHK 统一身份认证 SSO]
-        SMTP[邮件服务]
-        CRON[cron 定时脚本<br/>提醒邮件]
+    subgraph Backend["应用层 service :7000"]
+        Controller["x_controllers.py<br/>GraphQL Schema (Query / Mutation)"]
+        Views["x_views.py<br/>业务逻辑 view_*（鉴权 / 时间规则 / 行锁名额 / 导出）"]
+        Scheduler["x_scheduler.py<br/>每日 21:00 提醒调度（advisory lock 防重）"]
+        Mail["x_mail.py<br/>SMTP 发送 + 模板渲染 + pa_email_log 落库"]
+        OAuth["x_oauth.py<br/>ADFS code 换 token / id_token 验签"]
+        Models["x_models.py<br/>SQLAlchemy 2.0 sync 模型（pa_* 七表）"]
     end
 
-    STU -->|HTTPS| HAP
-    ADV -->|HTTPS| HAP
-    ADM -->|HTTPS| HAP
-    HAP -->|负载均衡 /b/id_x_007/graphql| API
-    STU -.->|单点登录跳转| SSO
-    ADV -.->|单点登录跳转| SSO
-    API --> CTRL --> VIEW --> MODEL
-    MODEL -->|SQLAlchemy 异步连接池| PG
-    CRON -->|读取次日预约| PG
-    CRON -->|SMTP 发信| SMTP
-    VIEW -->|预约 / 取消通知| SMTP
+    subgraph Data["数据层"]
+        PG[("PostgreSQL 18<br/>pa_* 业务表")]
+    end
+
+    Student -->|"HTTPS"| HAProxy
+    Advisor -->|"HTTPS"| HAProxy
+    Admin -->|"HTTPS"| HAProxy
+    Student -. "302 授权跳转" .-> ADFS
+    ADFS -. "redirect_uri + code" .-> Next
+    HAProxy -->|"path_beg b/id_x_007/"| Controller
+    HAProxy -->|"default_backend"| Next
+    Next -->|"POST b/id_x_007/graphql (Token 头)"| HAProxy
+    Controller --> Views
+    Views --> Models
+    Views --> Mail
+    Views --> OAuth
+    OAuth -->|"POST /token"| ADFS
+    Scheduler --> Models
+    Scheduler --> Mail
+    Mail -->|"STARTTLS"| SMTP
+    Models -->|"sync 会话"| PG
 ```
 
-<p align="center">图 5-1 整体架构图</p>
+## 6 请求流转图 (Request Flow Diagram)
 
-## 6. 请求流转图 (Request Flow Diagram)
+以学生「SSO 登录后提交预约」为例的完整生命周期：
 
 ```mermaid
 sequenceDiagram
-    participant U as 用户浏览器
+    autonumber
+    participant B as 学生浏览器
+    participant A as CUHK ADFS
     participant H as HAProxy
-    participant L as Litestar
-    participant G as GraphQL Schema
-    participant C as controllers.py
-    participant V as views.py
+    participant W as Next.js (web)
+    participant S as service (GraphQL)
     participant D as PostgreSQL
-    participant M as 邮件服务
+    participant M as SMTP
 
-    U->>H: HTTPS POST /b/id_x_007/graphql
-    H->>L: 健康检查通过后轮询转发
-    L->>G: 解析 Query / Mutation 操作
-    G->>G: 输入校验（Strawberry Input）
-    alt 未登录访问受保护操作
-        G-->>U: ResponseType(code=401)
-    else 校验通过
-        G->>C: 分发至对应 controller
-        C->>V: 调用业务视图函数
-        V->>D: SQLAlchemy 异步查询 / 写入
-        D-->>V: 返回结果集
-        alt 预约 / 取消成功
-            V->>M: 发送通知邮件（学生 + 顾问）
-            Note over V,M: 邮件失败仅记录日志，不影响主流程
-        end
-        alt 业务规则校验失败
-            V-->>U: 403 4小时内禁取消 / 400 表单联动校验失败
-        else 正常返回
-            V-->>U: ResponseType(code=200, data=JSON 字符串)
+    B->>W: 打开 f/007/login，点击 CUHK SSO 登录
+    B->>A: 302 /authorize（client_id + state + redirect_uri）
+    A-->>B: 认证通过，携 code 重定向回 f/007/oauth2
+    B->>W: 回调页校验 state（CSRF 防护）
+    B->>H: POST b/id_x_007/graphql (mutation oauthLogin{code})
+    H->>S: 路由至 service:7000
+    S->>A: POST /token（code + client_secret）
+    A-->>S: id_token（服务端验签 + nonce 校验）
+    S->>D: 按 upn 查 pa_user，无则自动建档为 student
+    S-->>B: ApiResponse{code=200, data=用户信息+Token}
+
+    B->>H: POST b/id_x_007/graphql (mutation studentAppointmentCreate, Header Token)
+    H->>S: 路由分发
+    alt Token 缺失或无效
+        S-->>B: ApiResponse{code=401}
+    else Token 有效
+        S->>D: SELECT pa_slot FOR UPDATE（行锁）
+        alt 距开始不足 24h / 名额已满 / 重复预约 / 表单联动校验失败
+            S-->>B: ApiResponse{code=403/400, 提示具体规则}
+        else 校验通过
+            S->>D: 写入 pa_appointment（单号 A+8 位）+ booked+1 并 commit
+            S->>D: 读取 pa_mail_template 渲染通知文案
+            S->>M: 向学生与顾问各发一封预约成功邮件
+            S->>D: 发送结果落库 pa_email_log（sent/failed/skipped）
+            S-->>B: ApiResponse{code=200, msg=预约成功}
         end
     end
+
+    Note over S,M: 每日 21:00（Asia/Shanghai）调度器抢占 advisory lock 后<br/>扫描次日 booked 预约，向双方发送提醒邮件并落库
 ```
 
-<p align="center">图 6-1 请求流转图</p>
-
-## 7. 目录结构 (Directory Structure)
+## 7 目录结构 (Directory Structure)
 
 ```text
-id_x_007/                         # 模型根目录
-├── src/
-│   ├── controllers/              # 控制层：GraphQL 操作分发
-│   │   └── x_controllers.py      #   Query / Mutation 方法入口
-│   ├── models/                   # ORM 层：SQLAlchemy 模型
-│   │   └── x_models.py           #   顾问 / 排期 / 预约 / 反馈 / 邮件记录
-│   ├── schemas/                  # 契约层：Strawberry 类型定义
-│   │   └── x_schemas.py          #   Input / ResponseType
-│   └── views/                    # 视图层：业务逻辑与规则校验
-│       └── x_views.py            #   预约 / 取消 / 排期 / 反馈 / 导出
+id_x_007/
+├── x_plugin.py                  # 插件入口：实现 PluginInterface，桥接同步会话并启动提醒调度器
+├── src/                         # 后端源码（由宿主框架按插件加载）
+│   ├── controllers/
+│   │   └── x_controllers.py     # GraphQL Schema（Query/Mutation）与路由注册，含安全加固
+│   ├── views/
+│   │   └── x_views.py           # 全部业务逻辑（鉴权、时间规则、行锁名额、反馈、Excel 导出）
+│   ├── models/
+│   │   └── x_models.py          # SQLAlchemy 2.0 sync 模型（用户/顾问/时段/预约/反馈/邮件日志/邮件模板）
+│   ├── schemas/
+│   │   └── x_schemas.py         # Strawberry Input/Type 契约定义（纯类型，无逻辑）
+│   └── utils/
+│       ├── x_crypto.py          # 登录传输加密：RSA-2048 OAEP-SHA256
+│       ├── x_security.py        # 口令哈希：PBKDF2-HMAC-SHA256
+│       ├── x_oauth.py           # ADFS OAuth2：授权码换 token、id_token 验签（PA_OAUTH_* 配置）
+│       ├── x_mail.py            # SMTP 发送 + 模板渲染回退 + pa_email_log 落库
+│       └── x_scheduler.py       # 每日 21:00 次日预约提醒（asyncio + pg advisory lock 防重）
+├── web/                         # 前端 Next.js 应用（独立构建，端口 2000）
+│   ├── src/app/f/007/            # 页面路由：login / oauth2 / user / advisor / admin
+│   ├── src/views/               # 页面级视图组件（顾问浏览/预约/排期/反馈/统计/邮件日志等）
+│   ├── src/components/          # 布局与通用组件（Admin/Advisor/UserLayout、AuthGuard）
+│   ├── src/api/                 # GraphQL 客户端封装（user / advisor / admin）
+│   └── src/utils/               # 加密、SSO 跳转、分页、下载、格式化等工具
 ├── scripts/
-│   ├── send_reminder_mail_advisor.py   # 顾问提醒（每日 21:00，次日有预约）
-│   └── send_reminder_mail_student.py   # 学生提醒（每日 21:00，次日有预约）
-├── utils/
-│   ├── database_client.py        # 数据库配置加载（加密凭据解密）
-│   ├── encrypt_util.py           # 加密工具
-│   ├── decrypt_util.py           # 解密工具
-│   └── log_util.py               # 日志工具
-├── ops/
-│   └── haproxy.cfg               # HAProxy 负载均衡配置
-├── web/                          # 前端应用（Next.js + React + Tailwind CSS）
-│   ├── src/
-│   │   ├── api/                  # GraphQL 客户端封装（单端点 POST）
-│   │   ├── app/                  # App Router 页面：登录、顾问列表、预约、
-│   │   │                         #   我的记录、排期管理、反馈、统计导出、SSO 回调
-│   │   ├── components/           # 组件：布局、顾问卡片、预约表单、排期表格
-│   │   └── stores/               # 用户状态管理
-│   ├── next.config.ts            # Next.js 构建配置
-│   └── package.json              # 前端依赖清单
-├── x_plugin.py                   # 插件入口：注册 GraphQL 路由 /b/id_x_007/graphql
-├── requirements.txt              # Python 依赖清单
-├── LICENSE                       # AGPL-3.0 许可证
-└── README.md                     # 项目说明文档
+│   └── reset_admin_password.py  # admin 密码重置脚本（psycopg2 直连，含会话失效）
+├── ops/                         # 容器化运维
+│   ├── podman-compose.yml       # db / service / web / haproxy 四容器编排
+│   ├── Dockerfile.service       # 后端镜像（uv 安装依赖，非 root 运行）
+│   ├── engine_compat/           # 容器内 Postgres 兼容覆盖（requirements/配置/CLI）
+│   ├── haproxy.cfg              # 路由分发、安全头、TLS 预留配置
+│   ├── init/                    # PostgreSQL 初始化 SQL（pa_* 建表、种子说明）
+│   ├── up.sh / down.sh          # Pod 模式一键启停（幂等）
+│   └── .env.example             # 环境变量模板（数据库 / SSO / SMTP / 调度开关）
+├── docs/                        # 产品功能文档、需求规格说明书（README-01/02.docx）
+└── LICENSE                      # GNU AGPL-3.0
 ```
 
-## 8. API 接口文档 (API Documentation)
+## 8 API 接口文档 (API Documentation)
 
-- 统一端点：`POST https://<HOST>/b/id_x_007/graphql`
-- 所有操作均为 GraphQL Query / Mutation；请求体 `{"query": "...", "variables": {"input": {...}}}`。
-- 响应统一封装为 `ResponseType { code, message, data }`，`data` 为 JSON 字符串，需客户端二次解析。
-- 受保护操作需登录会话，未登录返回 `code=401`。
+对外仅暴露**单一 GraphQL 端点**（已禁用 introspection 与 GraphiQL，仅接受 POST）：
 
-<p align="center">表 8-1 GraphQL 操作汇总</p>
+- 端点：`POST <BASE_URL>/b/id_x_007/graphql`
+- 鉴权：除公开操作外，均需在请求头携带 `Token: <TOKEN>`（登录成功后由服务端下发）
+- 统一响应：`ApiResponse { code, msg, data }`（`data` 为 JSON 载荷）；文件类操作返回 `FileResponse { code, msg, fileName, fileBase64 }`
+- 业务状态码：`200` 成功、`400` 参数错误、`401` 未登录、`403` 违反业务规则（如 24h/4h 时间规则）、`404` 资源不存在、`500` 服务器错误
+- 代管约定：顾问本人调用时 `advisorId` 传 `0`（服务端自动取本人档案）；admin 代管时必传目标顾问 ID
 
-| 类型 | 操作名 | 说明 |
-|------|--------|------|
-| Mutation | login | 管理员账号密码登录 |
-| Mutation | logout | 登出 |
-| Mutation | user_oauth | SSO 登录回调建档（学生 / 顾问） |
-| Query | get_advisor_list | 顾问列表（按专业 / 擅长方向筛选） |
-| Query | get_advisor_detail | 顾问详情（含近期可预约时段） |
-| Mutation | apply_booking | 提交预约（线上 / 线下表单联动校验，400） |
-| Query | get_my_booking_list | 学生端本人预约记录分页查询 |
-| Mutation | cancel_booking | 取消预约（开始前 4 小时内禁止，403；双向邮件通知） |
-| Mutation | create_schedule | 顾问单个新增时段 |
-| Mutation | update_schedule | 顾问修改 / 暂停 / 恢复时段 |
-| Mutation | delete_schedule | 顾问删除时段 |
-| Mutation | upload_schedule | 批量排期模板上传（.xlsx，400 格式错误） |
-| Query | download_schedule_template | 排期模板下载 |
-| Query | get_advisor_booking_list | 顾问查看报名自己的预约明细 |
-| Mutation | finish_booking | 咨询结束后标记"已完成" |
-| Mutation | create_feedback | 填写咨询反馈总结（仅管理员与顾问可见） |
-| Query | export_advisor_booking | 顾问导出个人历史预约（Excel） |
-| Mutation | create_advisor | 管理员创建顾问账号 |
-| Mutation | update_advisor | 管理员编辑顾问信息 / 启停状态 |
-| Mutation | delete_advisor | 管理员删除顾问账号 |
-| Query | get_booking_list | 管理端全量预约查询（按顾问 / 日期 / 状态筛选） |
-| Query | get_feedback_list | 管理端反馈记录汇总查询 |
-| Query | get_booking_stats | 统计分析（总数 / 完成 / 取消 / 顾问排名） |
-| Query | export_booking | 导出完整预约数据（Excel） |
-| Query | export_feedback | 导出反馈评价汇总表（Excel） |
-| Query | get_mail_log | 邮件发送记录查询 |
+### 8.1 Query（查询）
 
-调用示例（需替换 `<BASE_URL>` 与会话 Cookie）：
+<p align="center"><b>表2 Query 操作汇总</b></p>
+
+| 操作名 | 鉴权 | 角色 | 说明 |
+| --- | --- | --- | --- |
+| `health` | 否 | — | 健康检查，返回服务状态 |
+| `loginKey` | 否 | — | 下发 RSA-2048 公钥（PEM），前端加密账密用 |
+| `advisorList(data)` | Token | 任意 | 顾问卡片列表（分页，专业/方向筛选，含每人未来可约时段 ≤5 条） |
+| `advisorSlotList(data)` | Token | 任意 | 指定顾问全部可约时段（已过滤暂停/满额/24h 内时段） |
+| `myAppointmentList(data)` | Token | 本人 | 我的预约记录（分页，附可取消标记） |
+| `advisorMySlotList(data)` | Token | advisor/admin | 顾问排期列表（含暂停时段与接待状态） |
+| `advisorMyAppointmentList(data)` | Token | advisor/admin | 顾问预约明细（状态筛选，含反馈字段） |
+| `advisorSlotTemplate` | Token | advisor/admin | 批量排期 xlsx 模板下载（日期/开始/结束/名额） |
+| `advisorMyExport(data)` | Token | advisor/admin | 顾问个人历史预约导出（Excel，base64） |
+| `manageAdvisorList(data)` | Token | admin | 顾问列表（keyword 匹配姓名/用户名/专业/方向） |
+| `manageAppointmentList(data)` | Token | admin | 全量预约明细（顾问/日期/状态筛选） |
+| `manageFeedbackList(data)` | Token | admin | 反馈列表（顾问/月份筛选） |
+| `manageStats` | Token | admin | 运营统计：总量/完成/取消/进行中 + 顾问咨询量排名 |
+| `manageEmailLogList(data)` | Token | admin | 邮件发送日志（类型筛选，sent/failed/skipped） |
+| `manageMailTemplateList` | Token | admin | 邮件模板列表（booked/cancelled/reminder 三类） |
+| `manageAppointmentExport(data)` | Token | admin | 全量预约导出（顾问/月份过滤，Excel） |
+| `manageFeedbackExport(data)` | Token | admin | 反馈汇总导出（顾问/月份过滤，Excel） |
+
+### 8.2 Mutation（变更）
+
+<p align="center"><b>表3 Mutation 操作汇总</b></p>
+
+| 操作名 | 鉴权 | 角色 | 说明 |
+| --- | --- | --- | --- |
+| `login(data)` | 否 | admin/advisor | 账号密码登录（RSA 加密传输；student 角色拒绝并提示走 SSO） |
+| `register(data)` | 否 | — | 管理员注册（邮箱即登录用户名；注册后 `pa_user.is_active=FALSE`，须运维登库置 `TRUE` 激活后方可登录） |
+| `logout(data)` | Token | 本人 | 登出（服务端会话 key 失效） |
+| `oauthLogin(data)` | 否 | student/advisor | CUHK SSO 登录（ADFS 授权码流，首次自动建档为 student） |
+| `studentAppointmentCreate(data)` | Token | student | 提交预约（24h 截止、行锁名额、重复拦截、双方邮件通知） |
+| `studentAppointmentCancel(data)` | Token | 本人 | 学生取消预约（开始前 4h 内禁止，双方邮件通知） |
+| `advisorSlotCreate(data)` | Token | advisor/admin | 新增咨询时段（默认名额 1 人） |
+| `advisorSlotUpdate(data)` | Token | advisor/admin | 修改时段（名额不得小于已订数） |
+| `advisorSlotDelete(data)` | Token | advisor/admin | 删除时段（存在预约记录时拒绝，提示改用暂停） |
+| `advisorSlotState(data)` | Token | advisor/admin | 暂停/恢复时段（state: 1 开放 / 0 暂停） |
+| `advisorSlotBatchUpload(data)` | Token | advisor/admin | xlsx 批量排期导入（逐行校验，返回成功/失败行报告） |
+| `advisorAcceptingSet(data)` | Token | advisor/admin | 「暂不接待」整体开关（关闭后学生端不展示可约时段） |
+| `advisorAppointmentCancel(data)` | Token | advisor/admin | 顾问取消预约（必填原因，4h 规则，双方邮件通知） |
+| `advisorAppointmentComplete(data)` | Token | advisor/admin | 标记咨询完成（开始时间已过方可） |
+| `feedbackSet(data)` | Token | advisor/admin | 填写/更新咨询反馈（仅 completed 预约，upsert） |
+| `manageAdvisorCreate(data)` | Token | admin | 创建顾问（建 SSO 登录账号 + 顾问档案） |
+| `manageAdvisorUpdate(data)` | Token | admin | 更新顾问档案（留空字段不变，含启停用与接待状态） |
+| `manageAdvisorDelete(data)` | Token | admin | 删除顾问（有预约记录时拒绝并提示停用） |
+| `manageMailTemplateUpdate(data)` | Token | admin | 更新邮件模板（按类型 upsert 主题与正文 HTML） |
+
+### 8.3 调用示例
+
+健康检查（无需鉴权）：
 
 ```bash
-curl -X POST "<BASE_URL>/b/id_x_007/graphql" \
+curl -sS -X POST "<BASE_URL>/b/id_x_007/graphql" \
   -H "Content-Type: application/json" \
-  -d '{
-    "query": "mutation Login($input: LoginInput!) { login(input: $input) { code message data } }",
-    "variables": {"input": {"username": "<USERNAME>", "password": "<PASSWORD>"}}
-  }'
+  -d '{"query": "query { health { status service } }"}'
+```
 
-curl -X POST "<BASE_URL>/b/id_x_007/graphql" \
+学生浏览顾问列表（需替换 `<BASE_URL>` 与 `<TOKEN>`）：
+
+```bash
+curl -sS -X POST "<BASE_URL>/b/id_x_007/graphql" \
   -H "Content-Type: application/json" \
-  -H "Cookie: <SESSION_COOKIE>" \
+  -H "Token: <TOKEN>" \
   -d '{
-    "query": "mutation Apply($input: ApplyInput!) { apply_booking(input: $input) { code message data } }",
-    "variables": {"input": {"schedule_id": "<ID>", "topic": "<咨询主题>", "content": "<咨询内容>", "mode": "online", "phone": "<联系电话>", "wechat": "<微信号>"}}
+    "query": "query($data: AdvisorListInput!) { advisorList(data: $data) { code msg data } }",
+    "variables": { "data": { "page": 1, "pageSize": 12, "major": "", "direction": "" } }
   }'
 ```
 
-## 9. 快速部署 (Quick Deploy)
+学生提交预约（线上咨询须附微信号）：
+
+```bash
+curl -sS -X POST "<BASE_URL>/b/id_x_007/graphql" \
+  -H "Content-Type: application/json" \
+  -H "Token: <TOKEN>" \
+  -d '{
+    "query": "mutation($data: AppointmentCreateInput!) { studentAppointmentCreate(data: $data) { code msg data } }",
+    "variables": { "data": { "slotId": <SLOT_ID>, "topic": "选课建议", "content": "想咨询下学期选课规划", "mode": "online", "phone": "13800000000", "wechat": "wx_demo", "meetingLink": "" } }
+  }'
+```
+
+## 9 快速部署 (Quick Deploy)
 
 ### 9.1 环境准备 (Prerequisites)
 
-- Python 3.11+（建议 conda 虚拟环境）
-- Node.js 20+ 与 npm
-- PostgreSQL 12+
-- HAProxy、Supervisor、cron（生产环境）
+- Podman ≥ 4.x（Pod 模式）或 podman-compose（Compose 模式）
+- 可访问容器镜像仓库（PostgreSQL 18、HAProxy 3.2、Node 24、Python 3.10 基础镜像）
+- 本地开发另需：Python 3.10 + uv、Node.js ≥ 24
+- CUHK SSO 与邮件通知为可选增强：未配置 `PA_OAUTH_*` 时 SSO 登录返回"服务未配置"，未配置 `PA_SMTP_*` 时邮件仅落库不发送
 
 ### 9.2 安装 (Installation)
 
 ```bash
-# 后端依赖
-cd id_x_007
-pip install -r requirements.txt
+cd x_models/id_x_007/ops
+cp .env.example .env
+# 编辑 .env：
+#   POSTGRES_*          数据库账号
+#   PA_ADMIN_PASSWORD   初始 admin 口令（留空默认 admin123，生产务必修改）
+#   PA_OAUTH_*          ADFS client_id / client_secret / redirect_uri（SSO）
+#   PA_SMTP_* / PA_MAIL_FROM   SMTP 发信配置（邮件通知）
+#   PA_SCHEDULER_DISABLED      多实例部署时仅保留一个实例开启提醒调度
+```
 
-# 前端依赖
-cd web
-npm install
+前端构建期变量（如需变更域名或 ADFS 端点）：
+
+```bash
+cd ../web
+cp .env.local.example .env.local
+# 编辑 NEXT_PUBLIC_SITE_URL 与 NEXT_PUBLIC_ADFS_*（CLIENT_ID / AUTHORIZE_URL 等）
 ```
 
 ### 9.3 运行 (Run)
 
+Pod 模式一键启动（推荐，幂等可重复执行）：
+
 ```bash
-# 后端（GraphQL 端点 /b/id_x_007/graphql，数据库凭据经环境变量加密注入）
-python x_plugin.py
-
-# 前端开发
-cd web
-npm run dev
-
-# 前端生产构建
-npm run build
+cd x_models/id_x_007/ops
+./up.sh            # 首次执行自动构建镜像并顺序拉起 db → service → web → haproxy
+./up.sh --build    # 强制重新构建镜像
+./down.sh          # 停止并清理
 ```
 
-### 9.4 生产部署 (可选)
+启动完成后访问：
 
-- **Supervisor**：配置进程守护托管后端进程（含 `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` 加密环境变量）。
-- **HAProxy**：使用 `ops/haproxy.cfg`，SSL 终止于 HAProxy；`/b/id_x_007/graphql` 经健康检查（`option httpchk`）后轮询分发至多个后端实例，示例：
+- 统一入口：`http://localhost:8005`（HAProxy，`b/id_x_007/` 前缀转发后端，其余转发前端）
+- 登录页：`http://localhost:8005/f/007/login`（管理员初始账号 `admin`，口令取自 `.env` 的 `PA_ADMIN_PASSWORD`；可经「Register」自助注册管理员（邮箱即登录用户名），注册后须运维执行 `UPDATE pa_user SET is_active = TRUE WHERE username = '<邮箱>';` 激活方可登录；学生/顾问点击 CUHK SSO 登录）
+- PostgreSQL：宿主机 `localhost:55432`
 
-```text
-frontend sme_ugo
-    bind *:443 ssl crt /etc/haproxy/certs/cuhk-edu-cn.pem
-    default_backend litestar_nodes
+### 9.4 容器部署 (可选)
 
-backend litestar_nodes
-    balance roundrobin
-    option httpchk GET /b/id_x_007/health
-    server node1 127.0.0.1:8101 check
-    server node2 127.0.0.1:8102 check
+Compose 模式（podman-compose）：
+
+```bash
+cd x_models/id_x_007/ops
+podman-compose up -d --build
+podman-compose down
 ```
 
-- **cron**：配置提醒邮件定时任务：
+忘记 admin 密码时（宿主机执行，直连数据库重置并强制重登）：
 
-```text
-0 21 * * *  python scripts/send_reminder_mail_advisor.py
-0 21 * * *  python scripts/send_reminder_mail_student.py
+```bash
+python3 x_models/id_x_007/scripts/reset_admin_password.py
 ```
+
+生产环境启用 HTTPS：将 `fullchain.pem` 与私钥合并为 `site.pem` 挂载至 HAProxy 容器证书目录（`usr/local/etc/haproxy/certs/site.pem`），并按 `ops/haproxy.cfg` 内注释取消 8443 bind、301 跳转与 HSTS 响应头的注释。

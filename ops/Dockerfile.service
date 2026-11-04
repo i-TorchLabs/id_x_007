@@ -1,0 +1,50 @@
+# id_x_007 后端服务镜像（构建上下文为仓库根目录）
+FROM ghcr.io/astral-sh/uv:0.9-python3.10-bookworm-slim AS builder
+
+WORKDIR /app/i-Core
+
+# 容器内走 Postgres（宿主默认 DM8）：依赖清单由 ops/engine_compat 提供，不含 dmPython
+COPY x_models/id_x_007/ops/engine_compat/requirements.txt ./requirements.txt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system --no-cache -r requirements.txt
+
+FROM python:3.10-slim
+WORKDIR /app/i-Core
+
+# 运行时依赖：libpq（psycopg2）、curl（健康检查）、tzdata（时区数据）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 curl tzdata \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 10001 -m appuser
+
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+COPY main.py /app/i-Core/main.py
+COPY src /app/i-Core/src
+COPY utils /app/i-Core/utils
+COPY config /app/i-Core/config
+COPY x_models/_contracts /app/i-Core/x_models/_contracts
+COPY x_models/id_x_007 /app/i-Core/x_models/id_x_007
+
+# Postgres 兼容覆盖：替换宿主 DM8 专用 DB 工具与基础配置（EXTEND 仅加载 id_x_007）
+COPY x_models/id_x_007/ops/engine_compat/base_config.toml /app/i-Core/config/base_config.toml
+COPY x_models/id_x_007/ops/engine_compat/database_cli_util.py /app/i-Core/utils/database_cli_util.py
+
+RUN mkdir -p /app/i-Core/logs && chown -R appuser:appuser /app/i-Core
+
+ENV PROJECT_PATH=/app/i-Core \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Asia/Shanghai
+
+USER appuser
+EXPOSE 7000
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=12 --start-period=20s \
+    CMD curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:7000/ | grep -qE '200|400|401|404'
+
+CMD ["python", "main.py"]

@@ -1,0 +1,68 @@
+/** Advisor management page strings (advisorManagement namespace) */
+export default {
+  // Search bar
+  keyword: "Keyword",
+  keywordPlaceholder: "Name / username / major",
+  search: "Search",
+  add: "Add",
+  // Advisor list columns
+  columns: {
+    username: "Username",
+    name: "Name",
+    email: "Email",
+    grade: "Grade",
+    major: "Major",
+    direction: "Direction",
+    status: "Status",
+    accepting: "Accepting",
+    slots: "Slots",
+    appointments: "Appointments",
+    options: "Options",
+  },
+  advisorListAria: "Advisor list",
+  dataTableAria: "Data table",
+  noData: "No data",
+  // Status chips
+  enabled: "Enabled",
+  disabled: "Disabled",
+  yes: "Yes",
+  no: "No",
+  // Common buttons
+  edit: "Edit",
+  delete: "Delete",
+  cancel: "Cancel",
+  submit: "Submit",
+  // Add / edit modal
+  editTitle: "Edit Advisor",
+  addTitle: "Add Advisor",
+  fields: {
+    username: "Username",
+    name: "Name",
+    email: "Email",
+    grade: "Grade",
+    major: "Major",
+    direction: "Direction",
+    bio: "Bio",
+    photo: "Photo",
+    enabled: "Enabled",
+    accepting: "Accepting",
+  },
+  bioPlaceholder: "Advisor introduction",
+  uploadPhoto: "Upload (max 3MB)",
+  photoAlt: "Preview",
+  remove: "Remove",
+  noPhoto: "No photo",
+  // Delete confirmation
+  deleteConfirmTitle: "Confirm Delete",
+  deleteConfirmBody: "Delete advisor \"{name}\"? Advisors with existing appointments cannot be deleted.",
+  // Toasts
+  loadFail: "Fail to load data.",
+  photoTooLarge: "Photo must be smaller than 3MB.",
+  photoReadFail: "Fail to read photo.",
+  usernameRequired: "Username is required.",
+  nameRequired: "Name is required.",
+  saved: "Saved successfully.",
+  saveFail: "Fail to save.",
+  deleted: "Deleted successfully.",
+  deleteFail: "Fail to delete.",
+} as const;

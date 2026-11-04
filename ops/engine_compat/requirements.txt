@@ -1,0 +1,14 @@
+# id_x_007 容器内生产依赖（Postgres 版）：
+# 相对宿主 pyproject.toml 去除 DM8（dmPython）与数据分析/向量类依赖（numpy/pandas/pymilvus），
+# 新增 psycopg2-binary 作为 PostgreSQL 驱动。
+advanced-alchemy>=1.11.0
+cryptography>=43.0.0
+granian>=2.7.9
+litestar>=2.24.0
+openpyxl>=3.1.5
+psycopg2-binary>=2.9.9
+python-dotenv>=1.2.2
+sqlalchemy>=2.0.51
+strawberry-graphql>=0.323.2
+toml>=0.10.2
+tomli>=2.4.1

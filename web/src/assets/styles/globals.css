@@ -1,0 +1,32 @@
+@import "@heroui/styles";
+
+/* 品牌主色：紫色 #5b2a86（覆盖 HeroUI 默认蓝色 accent，按钮/链接/焦点环/选中态等随之生效）
+ * hover/soft 等变体由 --accent 经 color-mix 自动派生，无需逐个覆盖 */
+:root,
+:host {
+  --accent: #5b2a86;
+  --accent-foreground: #ffffff;
+}
+
+:root,
+[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  min-height: 100vh;
+}
+
+*,
+::before,
+::after {
+  box-sizing: border-box;
+}
