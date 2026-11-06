@@ -9,7 +9,7 @@
 - 账号不存在时创建一个 admin 角色账号。
 
 用法：
-    python3 reset_admin_password.py                     # 交互输入新密码，默认账号 admin
+    python3 reset_admin_password.py                     # 交互输入新密码，默认账号取 ops/.env 的 PA_ADMIN_USERNAME
     python3 reset_admin_password.py --username admin    # 指定账号
     PA_DB_HOST=127.0.0.1 PA_DB_PORT=55432 python3 reset_admin_password.py
 """
@@ -49,11 +49,16 @@ def load_env_file(path: Path) -> dict[str, str]:
 
 
 def main() -> int:
+    env = load_env_file(Path(__file__).resolve().parent.parent / "ops" / ".env")
+
     parser = argparse.ArgumentParser(description="Reset (or create) an admin account password.")
-    parser.add_argument("--username", default="admin", help="target username (default: admin)")
+    parser.add_argument(
+        "--username",
+        default=env.get("PA_ADMIN_USERNAME", "") or "admin",
+        help="target username (default: PA_ADMIN_USERNAME from ops/.env, else admin)",
+    )
     args = parser.parse_args()
 
-    env = load_env_file(Path(__file__).resolve().parent.parent / "ops" / ".env")
     host = os.environ.get("PA_DB_HOST", "127.0.0.1")
     port = int(os.environ.get("PA_DB_PORT", "55432"))
     dbname = env.get("POSTGRES_DB", "id_x_007")

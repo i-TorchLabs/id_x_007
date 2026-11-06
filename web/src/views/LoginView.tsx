@@ -8,6 +8,7 @@ import { loginApi, registerApi } from "@/api/user";
 import { useUserStore, type UserState } from "@/context/UserContext";
 import { redirectToAdfsAuthorize } from "@/utils/sso";
 import LanguageToggle from "@/i18n/LanguageToggle";
+import PasswordInput from "@/components/pa/PasswordInput";
 
 /** 登录成功后按角色跳转 */
 export const routeByRole = (role: string): string => {
@@ -136,15 +137,15 @@ export default function LoginView() {
       <div className="w-full h-full flex items-center justify-center">
         {/* 毛玻璃卡片：半透明底 + backdrop-blur，透出背景图 */}
         <div className="flex rounded-[10px] overflow-hidden bg-white/60 backdrop-blur-2xl border border-white/70 shadow-[0_8px_32px_rgba(0,0,0,0.25)]">
-          <div className="hidden md:flex relative min-w-[380px] w-[380px] h-[640px] flex-col justify-center items-center bg-[#5b2a86]/60 text-white px-10">
+          <div className="hidden md:flex relative min-w-[400px] w-[400px] h-[540px] flex-col justify-center items-center bg-[#5b2a86]/60 text-white px-10">
             <div className="text-[40px] font-bold tracking-wide">{t("brand")}</div>
             <div className="mt-4 text-[18px] text-center leading-8">{t("brandSub")}</div>
-            <div className="mt-10 w-16 border-t-2 border-white/60" />
-            <div className="mt-10 text-sm text-white/70 text-center">{t("brandSlogan")}</div>
+            <div className="mt-8 w-16 border-t-2 border-white/60" />
+            <div className="mt-8 text-sm text-white/70 text-center">{t("brandSlogan")}</div>
           </div>
-          <div className="w-[500px] h-[640px] flex justify-center flex-col items-center bg-white/40">
-            <div className="mb-4 font-bold text-[28px] text-center px-6">{t("title")}</div>
-            <div className="mb-6 font-normal text-[22px]">
+          <div className="w-[620px] max-w-full h-[540px] flex justify-center flex-col items-center bg-white/40">
+            <div className="mb-3 font-bold text-[28px] text-center px-6">{t("title")}</div>
+            <div className="mb-4 font-normal text-[20px]">
               {isRegister ? t("registerTitle") : t("loginTitle")}
             </div>
             <div className="w-3/5">
@@ -188,25 +189,21 @@ export default function LoginView() {
                   </>
                 )}
                 <div className="mt-3 w-full">
-                  <TextField value={password} onChange={setPassword} type="password">
-                    <InputGroup>
-                      <InputGroup.Prefix className="w-20">{t("password")}</InputGroup.Prefix>
-                      <InputGroup.Input placeholder={t("passwordPlaceholder")} />
-                    </InputGroup>
-                  </TextField>
+                  <PasswordInput
+                    label={t("password")}
+                    value={password}
+                    onChange={setPassword}
+                    placeholder={t("passwordPlaceholder")}
+                  />
                 </div>
                 {isRegister && (
                   <div className="mt-3 w-full">
-                    <TextField
+                    <PasswordInput
+                      label={t("confirm")}
                       value={confirmPassword}
                       onChange={setConfirmPassword}
-                      type="password"
-                    >
-                      <InputGroup>
-                        <InputGroup.Prefix className="w-20">{t("confirm")}</InputGroup.Prefix>
-                        <InputGroup.Input placeholder={t("confirmPlaceholder")} />
-                      </InputGroup>
-                    </TextField>
+                      placeholder={t("confirmPlaceholder")}
+                    />
                   </div>
                 )}
                 {!isRegister && needCaptcha && (
@@ -235,17 +232,17 @@ export default function LoginView() {
                     </div>
                   </div>
                 )}
-                <div className="mt-5">
+                <div className="mt-4">
                   <Button variant="primary" fullWidth type="submit" isPending={loading}>
                     {isRegister ? t("register") : t("login")}
                   </Button>
                 </div>
                 {isRegister && (
-                  <div className="mt-3 text-xs text-gray-500 text-center">{t("registerTip")}</div>
+                  <div className="mt-2 text-xs text-gray-500 text-center">{t("registerTip")}</div>
                 )}
               </form>
               {/* 登录 / 注册切换（注册产出待激活的 admin 账号） */}
-              <div className="mt-3 text-sm text-center">
+              <div className="mt-2 text-sm text-center">
                 {isRegister ? (
                   <span className="text-gray-500">
                     {t("hasAccount")}{" "}
@@ -273,7 +270,7 @@ export default function LoginView() {
               {!isRegister && (
                 <>
                   {/* 学生 / 顾问走 CUHK ADFS 单点登录（授权码流） */}
-                  <div className="my-4 flex items-center gap-3 text-xs text-gray-400">
+                  <div className="my-3 flex items-center gap-3 text-xs text-gray-400">
                     <div className="flex-1 border-t border-gray-300" />
                     {t("or")}
                     <div className="flex-1 border-t border-gray-300" />
@@ -281,11 +278,10 @@ export default function LoginView() {
                   <Button fullWidth variant="secondary" onPress={() => redirectToAdfsAuthorize()}>
                     {t("ssoLogin")}
                   </Button>
-                  <div className="mt-3 text-xs text-gray-500 text-center">{t("ssoTip")}</div>
+                  <div className="mt-2 text-xs text-gray-500 text-center">{t("ssoTip")}</div>
                 </>
               )}
             </div>
-            <br />
           </div>
         </div>
       </div>

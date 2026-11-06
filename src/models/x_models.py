@@ -165,28 +165,32 @@ class PaMailTemplate(Base):
 
 
 def seed_initial_admin(conn: Connection) -> None:
-    """播种初始管理员账号（幂等）。
+    """播种初始管理员账号（幂等，按用户名判重）。
 
-    - 账号：admin；口令：PA_ADMIN_PASSWORD 环境变量（默认 admin123）；
+    - 账号：环境变量 PA_ADMIN_USERNAME（默认 admin）；
+      口令：PA_ADMIN_PASSWORD（默认 admin123）；
+    - 用户名为邮箱格式时同步写入 email 字段，姓名取 @ 前局部部分；
     - 口令以 PBKDF2 哈希落库（见 utils/x_security.py）；
-    - 已存在 admin 角色用户则跳过（兼容 ops/init/02_add_user.sql 先行播种）。
+    - 目标用户名已存在（任意角色）则跳过，避免重复播种或覆盖既有账号。
     """
     from x_models.id_x_007.src.utils.x_security import hash_password
 
+    username = (os.environ.get("PA_ADMIN_USERNAME", "")).strip() or "admin"
     existing = conn.execute(
-        select(PaUser.id).where(PaUser.role == "admin").limit(1)
+        select(PaUser.id).where(PaUser.username == username).limit(1)
     ).first()
     if existing:
         return
     password = os.environ.get("PA_ADMIN_PASSWORD", "") or "admin123"
+    is_email = "@" in username
     conn.execute(
         insert(PaUser).values(
-            username="admin",
+            username=username,
             password=hash_password(password),
             key="N/A",
             role="admin",
-            name="管理员",
-            email="N/A",
+            name=username.split("@", 1)[0] if is_email else "管理员",
+            email=username if is_email else "N/A",
             state="1",
             is_active=True,
             create_time=datetime.now(),

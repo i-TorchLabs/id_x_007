@@ -8,6 +8,9 @@ export default {
   cancel: "取消",
   confirm: "确认",
   switchLanguage: "切换语言",
+  // 密码框可见性切换（PasswordInput）
+  showPassword: "显示密码",
+  hidePassword: "隐藏密码",
   // 管理端菜单（AdminLayout）
   menuAdmin: {
     advisors: "顾问管理",

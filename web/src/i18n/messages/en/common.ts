@@ -8,6 +8,9 @@ export default {
   cancel: "Cancel",
   confirm: "Confirm",
   switchLanguage: "Switch language",
+  // Password input visibility toggle (PasswordInput)
+  showPassword: "Show password",
+  hidePassword: "Hide password",
   // Admin menu (AdminLayout)
   menuAdmin: {
     advisors: "Advisors",

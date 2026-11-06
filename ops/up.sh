@@ -54,6 +54,10 @@ until [ "$(podman inspect --format '{{.State.Health.Status}}' "${PLUGIN}_db" 2>/
     sleep 2
 done
 
+# 日志目录（审计/引擎日志按天轮转落盘宿主，容器重建不丢失）
+mkdir -p "${OPS_DIR}/../logs"
+chmod 1777 "${OPS_DIR}/../logs"
+
 if ! podman container exists "${PLUGIN}_service"; then
     podman run -d --pod "${PLUGIN}" --name "${PLUGIN}_service" \
         -e DB_NAME="${POSTGRES_DB}" \
@@ -61,6 +65,7 @@ if ! podman container exists "${PLUGIN}_service"; then
         -e DB_PORT=5432 \
         -e DB_USERNAME="${POSTGRES_USER}" \
         -e DB_PASSWORD="${POSTGRES_PASSWORD}" \
+        -e PA_ADMIN_USERNAME="${PA_ADMIN_USERNAME:-}" \
         -e PA_ADMIN_PASSWORD="${PA_ADMIN_PASSWORD:-}" \
         -e PA_OAUTH_CLIENT_ID="${PA_OAUTH_CLIENT_ID:-}" \
         -e PA_OAUTH_CLIENT_SECRET="${PA_OAUTH_CLIENT_SECRET:-}" \
@@ -73,8 +78,10 @@ if ! podman container exists "${PLUGIN}_service"; then
         -e PA_MAIL_FROM="${PA_MAIL_FROM:-}" \
         -e PA_SCHEDULER_DISABLED="${PA_SCHEDULER_DISABLED:-}" \
         -e PA_MAX_UPLOAD_BYTES="${PA_MAX_UPLOAD_BYTES:-}" \
+        -e PA_AUDIT_RETAIN_DAYS="${PA_AUDIT_RETAIN_DAYS:-90}" \
         -e PROJECT_PATH=/app/i-Core \
         -e TZ=Asia/Shanghai \
+        -v "${OPS_DIR}/../logs:/app/i-Core/logs" \
         "${PLUGIN}_service"
 fi
 

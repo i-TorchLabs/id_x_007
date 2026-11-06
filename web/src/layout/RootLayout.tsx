@@ -3,7 +3,7 @@ import "@/assets/styles/globals.css";
 import Providers from "./Providers";
 
 export const metadata: Metadata = {
-  title: "SME UGO",
+  title: "UGO Peer Advisor Appointment",
   description: "UGO 朋辈顾问咨询预约系统（顾问浏览 / 预约 / 反馈）",
   icons: { icon: "/CUHKSZ-ICON.ico" },
 };

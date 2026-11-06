@@ -45,6 +45,7 @@
 6. **GraphQL 安全闭环** —— Schema 层启用 `DisableIntrospection`（关闭内省）与 `QueryDepthLimiter(max_depth=8)`（防深层嵌套 DoS）；路由层禁用 GraphiQL IDE、仅接受 POST 查询，杜绝 GET 直达与缓存投毒。
 7. **凭证零前端暴露** —— 管理员登录口令经服务端下发的 RSA-2048 公钥（OAEP-SHA256）加密后提交，私钥仅存服务端内存；口令以 PBKDF2-HMAC-SHA256（10 万次迭代 + 随机盐）落库；连续失败触发图形验证码与账号锁定，恒定哈希比较防用户名枚举。
 8. **可审计的取消语义** —— 取消预约不物理删除记录，而是置 `cancelled_student` / `cancelled_advisor` 状态并保留取消原因，统计与导出口径完整可追溯。
+9. **用户行为审计日志** —— 认证成功/失败（含锁定、停用、验证码等失败原因）、预约/时段/反馈/顾问/邮件模板全部变更及 Excel 导出操作，以 JSON Lines 追加写入 `logs/id_x_007_audit.log`（含请求 ID、操作人、角色、目标单号、来源 IP），按天轮转、默认保留 90 天（`PA_AUDIT_RETAIN_DAYS` 可调）；引擎运行日志同步按天轮转（默认保留 30 天，`LOG.RETAIN_DAYS` 可调）。
 
 ## 4 技术栈 (Tech Stack)
 
@@ -182,6 +183,7 @@ id_x_007/
 │   ├── schemas/
 │   │   └── x_schemas.py         # Strawberry Input/Type 契约定义（纯类型，无逻辑）
 │   └── utils/
+│       ├── x_audit.py            # 用户行为审计日志（JSON Lines、按天轮转、默认保留 90 天）
 │       ├── x_crypto.py          # 登录传输加密：RSA-2048 OAEP-SHA256
 │       ├── x_security.py        # 口令哈希：PBKDF2-HMAC-SHA256
 │       ├── x_oauth.py           # ADFS OAuth2：授权码换 token、id_token 验签（PA_OAUTH_* 配置）
@@ -195,6 +197,7 @@ id_x_007/
 │   └── src/utils/               # 加密、SSO 跳转、分页、下载、格式化等工具
 ├── scripts/
 │   └── reset_admin_password.py  # admin 密码重置脚本（psycopg2 直连，含会话失效）
+├── logs/                        # 运行时日志（审计 id_x_007_audit.log + 引擎日志，按天轮转；容器挂载宿主持久化）
 ├── ops/                         # 容器化运维
 │   ├── podman-compose.yml       # db / service / web / haproxy 四容器编排
 │   ├── Dockerfile.service       # 后端镜像（uv 安装依赖，非 root 运行）
@@ -317,10 +320,12 @@ cd x_models/id_x_007/ops
 cp .env.example .env
 # 编辑 .env：
 #   POSTGRES_*          数据库账号
-#   PA_ADMIN_PASSWORD   初始 admin 口令（留空默认 admin123，生产务必修改）
+#   PA_ADMIN_*          初始管理员兜底播种（首启 DB 初始化已由 ops/init/02_add_user.sql
+#                       预置管理员 sme@cuhk.edu.cn；仅当该用户名不存在时应用层才会补种）
 #   PA_OAUTH_*          ADFS client_id / client_secret / redirect_uri（SSO）
 #   PA_SMTP_* / PA_MAIL_FROM   SMTP 发信配置（邮件通知）
 #   PA_SCHEDULER_DISABLED      多实例部署时仅保留一个实例开启提醒调度
+#   PA_AUDIT_RETAIN_DAYS       审计日志保留天数（默认 90，logs/ 下按天轮转）
 ```
 
 前端构建期变量（如需变更域名或 ADFS 端点）：
@@ -345,7 +350,7 @@ cd x_models/id_x_007/ops
 启动完成后访问：
 
 - 统一入口：`http://localhost:8005`（HAProxy，`b/id_x_007/` 前缀转发后端，其余转发前端）
-- 登录页：`http://localhost:8005/f/007/login`（管理员初始账号 `admin`，口令取自 `.env` 的 `PA_ADMIN_PASSWORD`；可经「Register」自助注册管理员（邮箱即登录用户名），注册后须运维执行 `UPDATE pa_user SET is_active = TRUE WHERE username = '<邮箱>';` 激活方可登录；学生/顾问点击 CUHK SSO 登录）
+- 登录页：`http://localhost:8005/f/007/login`（预置管理员 `sme@cuhk.edu.cn` / `P@sssme!`，由数据库初始化脚本 `ops/init/02_add_user.sql` 植入，首启即生效且已激活；可经「Register」自助注册管理员（邮箱即登录用户名），注册后须运维执行 `UPDATE pa_user SET is_active = TRUE WHERE username = '<邮箱>';` 激活方可登录；学生/顾问点击 CUHK SSO 登录）
 - PostgreSQL：宿主机 `localhost:55432`
 
 ### 9.4 容器部署 (可选)

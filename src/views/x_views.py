@@ -30,6 +30,8 @@ from strawberry.types import Info
 
 from utils.log_util import get_request_id, logger
 
+from x_models.id_x_007.src.utils.x_audit import audit
+
 from x_models.id_x_007.src.models.x_models import (
     PaAdvisor,
     PaAppointment,
@@ -510,8 +512,9 @@ def _verify_captcha(captcha_id: str, captcha_code: str) -> bool:
     return secrets.compare_digest(code, captcha_code.strip().lower())
 
 
-def _login_fail_response(username: str) -> ApiResponse:
+def _login_fail_response(username: str, info: Info | None = None) -> ApiResponse:
     """登录失败统一响应：失败计数达验证码门槛时随 401 一并下发新验证码。"""
+    audit("auth.login_fail", None, username=username, info=info, result="fail", detail="账号或密码错误")
     if _captcha_required(username):
         cap = _generate_captcha()
         return _resp(401, "Login Fail", {
@@ -559,15 +562,18 @@ def view_login(info: Info, data: LoginInput) -> ApiResponse:
             if credentials is None:
                 # 密文无法解密（非本公钥加密/被篡改/密钥已轮换）：统一按登录失败处理，不泄露细节
                 logger.warning(f"{_rid()}登录凭据解密失败")
+                audit("auth.login_fail", None, info=info, result="fail", detail="登录凭据解密失败")
                 return _resp(400, "登录请求无效，请刷新页面后重试")
             username, password = credentials
             # 防暴力破解：锁定中的账号直接拒绝
             locked_for = _login_locked(username)
             if locked_for:
+                audit("auth.login_fail", None, username=username, info=info, result="fail", detail="账号锁定中")
                 return _resp(423, f"账号已锁定，请 {locked_for // 60 + 1} 分钟后再试")
             # 验证码门槛：连续失败达阈值后必须先通过验证码
             if _captcha_required(username):
                 if not _verify_captcha(data.captcha_id, data.captcha_code):
+                    audit("auth.login_fail", None, username=username, info=info, result="fail", detail="验证码错误或缺失")
                     cap = _generate_captcha()
                     return _resp(428, "需要验证码", {
                         "need_captcha": "true",
@@ -578,24 +584,27 @@ def view_login(info: Info, data: LoginInput) -> ApiResponse:
             if not obj:
                 check_password(DUMMY_HASH, password)  # 抹平时序，防用户名枚举
                 _record_login_failure(username)
-                return _login_fail_response(username)
+                return _login_fail_response(username, info)
             if obj.role == "student":
                 # 学生禁止密码登录（无本地口令），引导走 SSO
+                audit("auth.login_fail", obj, info=info, result="fail", detail="学生账号尝试密码登录")
                 return _resp(403, "学生账号请使用 CUHK SSO 登录")
             if obj.state != "1":
+                audit("auth.login_fail", obj, info=info, result="fail", detail="账号已停用")
                 return _resp(403, "账号已停用")
             if not obj.is_active:
                 # 自助注册的 admin 默认未激活，须运维登库置 is_active=True
+                audit("auth.login_fail", obj, info=info, result="fail", detail="账号待激活")
                 return _resp(403, "账号待激活，请联系运维人员激活后登录")
             if obj.password == "N/A":
                 # SSO 预建账号（advisor）未设置本地密码：禁止密码登录，防 "N/A" 明文兼容被利用
                 check_password(DUMMY_HASH, password)
                 _record_login_failure(username)
-                return _login_fail_response(username)
+                return _login_fail_response(username, info)
             ok, new_hash = check_password(obj.password, password)
             if not ok:
                 _record_login_failure(username)
-                return _login_fail_response(username)
+                return _login_fail_response(username, info)
             _clear_login_failures(username)
             key = secrets.token_urlsafe(32)
             obj.key = key
@@ -604,6 +613,7 @@ def view_login(info: Info, data: LoginInput) -> ApiResponse:
                 obj.password = new_hash
             session.commit()
             logger.info(f"{_rid()}User {username} logged in")
+            audit("auth.login", obj, info=info, detail="账号密码登录成功")
             return _resp(200, "Login Success", {
                 "user_id": str(obj.id),
                 "token": key,
@@ -659,6 +669,7 @@ def view_register(info: Info, data: RegisterInput) -> ApiResponse:
             ))
             session.commit()
             logger.info(f"{_rid()}管理员注册成功（待激活） email={email}")
+            audit("auth.register", None, username=email, info=info, detail="管理员自助注册（待激活）")
             return _resp(200, "注册成功，账号待运维激活后方可登录")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -677,6 +688,12 @@ def view_logout(info: Info, data: LogoutInput) -> ApiResponse:
             if obj:
                 obj.key = "N/A"
                 session.commit()
+            return _resp(200, "Logout Success")
+            obj = _first(session, select(PaUser).where(PaUser.id == data.user_id))
+            if obj:
+                obj.key = "N/A"
+                session.commit()
+            audit("auth.logout", user, info=info, target=f"user#{data.user_id}")
             return _resp(200, "Logout Success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -813,6 +830,7 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                 obj.update_time = datetime.now()
                 session.commit()
             logger.info(f"{_rid()}SSO 登录成功 {upn}（{obj.role}）")
+            audit("auth.sso_login", obj, info=info, detail="CUHK SSO 登录成功")
             return _resp(200, "Login Success", {
                 "user_id": str(obj.id),
                 "token": session_key,
@@ -1045,6 +1063,8 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
             session.add(appt)
             session.commit()
             logger.info(f"{_rid()}学生 {user.username} 预约顾问 {advisor.name}，单号 {apply_no}")
+            audit("appointment.create", user, info=info, target=apply_no,
+                  detail=f"顾问={advisor.name} 时段#{slot.id} 方式={mode}")
             # 预约成功邮件（双方；失败仅落日志不影响预约结果）
             advisor_user = _advisor_user(session, advisor)
             student_user = _first(session, select(PaUser).where(PaUser.id == user.id))
@@ -1098,6 +1118,7 @@ def view_student_appointment_cancel(info: Info, data: AppointmentIdInput) -> Api
             slot.update_time = now
             session.commit()
             logger.info(f"{_rid()}学生取消预约 {appt.apply_no}")
+            audit("appointment.cancel", user, info=info, target=appt.apply_no, detail="学生取消")
             advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == appt.advisor_id))
             _notify_both(
                 session,
@@ -1194,6 +1215,8 @@ def view_advisor_slot_create(info: Info, data: SlotCreateInput) -> ApiResponse:
             session.add(obj)
             session.commit()
             logger.info(f"{_rid()}顾问 {advisor.name} 新增时段 {_fmt_dt(start_dt)}~{_fmt_dt(end_dt)}")
+            audit("slot.create", user, info=info, target=f"slot#{obj.id}",
+                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)} 名额={quota} 顾问={advisor.name}")
             return _resp(200, "success", {"slotId": obj.id})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1241,6 +1264,8 @@ def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
             obj.quota = quota
             obj.update_time = datetime.now()
             session.commit()
+            audit("slot.update", user, info=info, target=f"slot#{obj.id}",
+                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)} 名额={quota}")
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1277,6 +1302,8 @@ def view_advisor_slot_delete(info: Info, data: SlotIdInput) -> ApiResponse:
             session.execute(delete(PaSlot).where(PaSlot.id == obj.id))
             session.commit()
             logger.info(f"{_rid()}顾问 {advisor.name} 删除时段 {_fmt_dt(obj.start_time)}")
+            audit("slot.delete", user, info=info, target=f"slot#{obj.id}",
+                  detail=f"{_fmt_dt(obj.start_time)}~{_fmt_dt(obj.end_time)} 顾问={advisor.name}")
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1303,6 +1330,8 @@ def view_advisor_slot_state(info: Info, data: SlotStateInput) -> ApiResponse:
             obj.state = data.state
             obj.update_time = datetime.now()
             session.commit()
+            audit("slot.state", user, info=info, target=f"slot#{obj.id}",
+                  detail="开放" if data.state == "1" else "暂停")
             return _resp(200, "success", {"state": obj.state})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1450,6 +1479,7 @@ def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> Ap
                     fail_num += 1
                     errors.append({"row": row_no, "reason": str(e)[:200]})
             logger.info(f"{_rid()}顾问 {advisor.name} 批量上传排期：成功 {success_num} 失败 {fail_num}")
+            audit("slot.batch_upload", user, info=info, detail=f"成功 {success_num} 行 / 失败 {fail_num} 行")
             return _resp(200, "success", {
                 "success": success_num,
                 "fail": fail_num,
@@ -1495,6 +1525,8 @@ def view_advisor_accepting_set(info: Info, data: AcceptingSetInput) -> ApiRespon
             advisor.accepting = data.accepting
             advisor.update_time = datetime.now()
             session.commit()
+            audit("slot.accepting", user, info=info, target=f"advisor#{advisor.id}",
+                  detail="恢复接待" if advisor.accepting == "1" else "暂停接待")
             return _resp(200, "success", {"accepting": advisor.accepting})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1612,6 +1644,8 @@ def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> Api
             slot.update_time = now
             session.commit()
             logger.info(f"{_rid()}顾问 {advisor.name} 取消预约 {appt.apply_no}：{reason}")
+            audit("appointment.cancel_by_advisor", user, info=info, target=appt.apply_no,
+                  detail=f"原因={reason}")
             _notify_both(
                 session,
                 mail_type="cancelled",
@@ -1659,6 +1693,7 @@ def view_advisor_appointment_complete(info: Info, data: AdvisorCompleteInput) ->
             appt.update_time = datetime.now()
             session.commit()
             logger.info(f"{_rid()}预约 {appt.apply_no} 标记完成")
+            audit("appointment.complete", user, info=info, target=appt.apply_no)
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1700,6 +1735,8 @@ def view_feedback_set(info: Info, data: FeedbackSetInput) -> ApiResponse:
             feedback.need_followup = need_followup
             feedback.update_time = datetime.now()
             session.commit()
+            audit("appointment.feedback", user, info=info, target=appt.apply_no,
+                  detail=f"需跟进={'是' if need_followup == '1' else '否'}")
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1759,6 +1796,7 @@ def view_advisor_my_export(info: Info, data: AdvisorExportInput) -> FileResponse
             ws.append(header)
             _append_appointment_rows(session, ws, rows, include_advisor=False)
             _style_header_row(ws, len(header))
+            audit("export.my_appointments", user, info=info, detail=f"导出 {len(rows)} 行")
             return _workbook_to_file(wb, "MyAppointments.xlsx")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1824,7 +1862,8 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
 
 def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> ApiResponse:
     """创建顾问：建 pa_user（role=advisor，password="N/A"，走 SSO 登录）+ pa_advisor。"""
-    if not _verify_admin(info):
+    user = _verify_admin(info)
+    if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
@@ -1861,6 +1900,8 @@ def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> Ap
             session.add(advisor)
             session.commit()
             logger.info(f"{_rid()}创建顾问：{username} {name}")
+            audit("advisor.create", user, info=info, target=f"advisor#{advisor.id}",
+                  detail=f"账号={username} 姓名={name}")
             return _resp(200, "success", {"advisorId": advisor.id, "userId": acct.id})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1870,7 +1911,8 @@ def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> Ap
 
 def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> ApiResponse:
     """更新顾问档案（留空字段不变；status/accepting 同步控制）。"""
-    if not _verify_admin(info):
+    user = _verify_admin(info)
+    if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
@@ -1909,6 +1951,8 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
             if acct:
                 acct.update_time = now
             session.commit()
+            audit("advisor.update", user, info=info, target=f"advisor#{advisor.id}",
+                  detail=f"姓名={advisor.name}")
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1918,7 +1962,8 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
 
 def view_manage_advisor_delete(info: Info, data: ManageAdvisorIdInput) -> ApiResponse:
     """删除顾问：有预约记录时拒绝并提示改用停用；连带删除排期与登录账号。"""
-    if not _verify_admin(info):
+    user = _verify_admin(info)
+    if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
@@ -1936,6 +1981,8 @@ def view_manage_advisor_delete(info: Info, data: ManageAdvisorIdInput) -> ApiRes
             session.execute(delete(PaUser).where(PaUser.id == advisor.user_id))
             session.commit()
             logger.info(f"{_rid()}删除顾问：{advisor.name}")
+            audit("advisor.delete", user, info=info, target=f"advisor#{advisor.id}",
+                  detail=f"姓名={advisor.name}")
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -2138,7 +2185,8 @@ def _filtered_appointment_rows(session, advisor_id: Any, month: str):
 
 def view_manage_appointment_export(info: Info, data: ManageExportInput) -> FileResponse:
     """管理端全量预约导出（可按顾问/月份过滤，Excel base64）。"""
-    if not _verify_admin(info):
+    user = _verify_admin(info)
+    if not user:
         return FileResponse(code=401, msg="Token Error")
     maker = get_session()
     with maker() as session:
@@ -2154,6 +2202,8 @@ def view_manage_appointment_export(info: Info, data: ManageExportInput) -> FileR
             ws.append(header)
             _append_appointment_rows(session, ws, rows, include_advisor=True)
             _style_header_row(ws, len(header))
+            audit("export.appointments", user, info=info,
+                  detail=f"advisor_id={data.advisor_id} month={data.month} 共 {len(rows)} 行")
             return _workbook_to_file(wb, "AppointmentExport.xlsx")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -2163,7 +2213,8 @@ def view_manage_appointment_export(info: Info, data: ManageExportInput) -> FileR
 
 def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResponse:
     """反馈汇总导出（可按顾问/月份过滤，Excel base64）。"""
-    if not _verify_admin(info):
+    user = _verify_admin(info)
+    if not user:
         return FileResponse(code=401, msg="Token Error")
     maker = get_session()
     with maker() as session:
@@ -2208,6 +2259,8 @@ def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResp
                     _fmt_dt(feedback.update_time or feedback.create_time, "%Y-%m-%d %H:%M:%S"),
                 ])
             _style_header_row(ws, len(header))
+            audit("export.feedback", user, info=info,
+                  detail=f"advisor_id={data.advisor_id} month={data.month} 共 {len(rows)} 行")
             return _workbook_to_file(wb, "FeedbackExport.xlsx")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -2242,7 +2295,8 @@ def view_manage_mail_template_list(info: Info) -> ApiResponse:
 
 def view_manage_mail_template_update(info: Info, data: ManageMailTemplateUpdateInput) -> ApiResponse:
     """邮件模板更新（admin）：按类型 upsert 主题与正文 HTML。"""
-    if not _verify_admin(info):
+    user = _verify_admin(info)
+    if not user:
         return _resp(401, "Token Error")
     mail_type = data.mail_type.strip()
     subject = data.subject.strip()
@@ -2269,6 +2323,7 @@ def view_manage_mail_template_update(info: Info, data: ManageMailTemplateUpdateI
                 ))
             session.commit()
             logger.info(f"{_rid()}管理员更新邮件模板 {mail_type}")
+            audit("mail_template.update", user, info=info, target=mail_type)
             return _resp(200, "更新成功")
         except Exception as e:
             logger.error(f"{_rid()}{e}")

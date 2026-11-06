@@ -21,6 +21,8 @@ class _Idx007Plugin:
       构造同步 sessionmaker 注入模块（容器部署则由 ops/engine_compat 全局走同步，
       不经过此桥接）；注入成功后启动每日 21:00 的预约提醒调度器
       （无运行中事件循环 / PA_SCHEDULER_DISABLED=1 时自动跳过）。
+    业务侧另含用户行为审计日志（utils/x_audit.py）：认证/变更/导出操作写入
+    logs/id_x_007_audit.log（JSON Lines，按天轮转，PA_AUDIT_RETAIN_DAYS 控制保留）。
     """
 
     name = "id_x_007"
