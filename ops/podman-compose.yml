@@ -80,7 +80,7 @@ services:
       SERVICE_HOST: service
       WEB_HOST: web
     ports:
-      - "8005:8080"
+      - "8007:8080"
     depends_on:
       - service
       - web

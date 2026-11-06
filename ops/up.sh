@@ -3,7 +3,7 @@
 set -euo pipefail
 
 PLUGIN="id_x_007"
-HOST_PORT=8005
+HOST_PORT=8007
 OPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${OPS_DIR}/../../.." && pwd)"
 
@@ -25,7 +25,7 @@ fi
 
 # 3. Pod（已存在则跳过）
 if ! podman pod exists "${PLUGIN}"; then
-    # 宿主机 55432 -> pod 5432(由容器内 db 监听),宿主机 8005 -> pod 8080
+    # 宿主机 55432 -> pod 5432(由容器内 db 监听),宿主机 8007 -> pod 8080
     podman pod create --name "${PLUGIN}" \
         -p "${HOST_PORT}:8080" \
         -p "55432:5432"

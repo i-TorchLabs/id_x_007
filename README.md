@@ -83,7 +83,7 @@ graph TD
     end
 
     subgraph Gateway["接入层"]
-        HAProxy["HAProxy :8080 (宿主机 :8005)"]
+        HAProxy["HAProxy :8080 (宿主机 :8007)"]
     end
 
     subgraph Frontend["前端层 web :2000"]
@@ -349,8 +349,8 @@ cd x_models/id_x_007/ops
 
 启动完成后访问：
 
-- 统一入口：`http://localhost:8005`（HAProxy，`b/id_x_007/` 前缀转发后端，其余转发前端）
-- 登录页：`http://localhost:8005/f/007/login`（预置管理员 `sme@cuhk.edu.cn` / `P@sssme!`，由数据库初始化脚本 `ops/init/02_add_user.sql` 植入，首启即生效且已激活；可经「Register」自助注册管理员（邮箱即登录用户名），注册后须运维执行 `UPDATE pa_user SET is_active = TRUE WHERE username = '<邮箱>';` 激活方可登录；学生/顾问点击 CUHK SSO 登录）
+- 统一入口：`http://localhost:8007`（HAProxy，`b/id_x_007/` 前缀转发后端，其余转发前端）
+- 登录页：`http://localhost:8007/f/007/login`（预置管理员 `sme@cuhk.edu.cn` / `P@sssme!`，由数据库初始化脚本 `ops/init/02_add_user.sql` 植入，首启即生效且已激活；可经「Register」自助注册管理员（邮箱即登录用户名），注册后须运维执行 `UPDATE pa_user SET is_active = TRUE WHERE username = '<邮箱>';` 激活方可登录；学生/顾问点击 CUHK SSO 登录）
 - PostgreSQL：宿主机 `localhost:55432`
 
 ### 9.4 容器部署 (可选)
