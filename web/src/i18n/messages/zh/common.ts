@@ -1,6 +1,6 @@
 /** 通用文案：布局骨架 / 菜单 / 弹窗 / 分页 / 表单控件（common 命名空间） */
 export default {
-  appName: "UGO 朋辈顾问预约",
+  appName: "UGO 咨询预约",
   home: "首页",
   logout: "退出登录",
   logoutConfirmTitle: "提示",
@@ -19,11 +19,6 @@ export default {
     feedback: "反馈管理",
     stats: "数据统计",
     emailLogs: "邮件日志",
-  },
-  // 顾问端菜单（AdvisorLayout）
-  menuAdvisor: {
-    mySchedule: "我的时段",
-    myAppointments: "我的预约",
   },
   // 学生端菜单（UserLayout）
   menuUser: {

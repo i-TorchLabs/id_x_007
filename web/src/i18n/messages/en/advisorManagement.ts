@@ -1,11 +1,11 @@
-/** Advisor management page strings (advisorManagement namespace) */
+/** Consultant management page strings (advisorManagement namespace) */
 export default {
   // Search bar
   keyword: "Keyword",
   keywordPlaceholder: "Name / username / major",
   search: "Search",
   add: "Add",
-  // Advisor list columns
+  // Consultant list columns
   columns: {
     username: "Username",
     name: "Name",
@@ -19,7 +19,7 @@ export default {
     appointments: "Appointments",
     options: "Options",
   },
-  advisorListAria: "Advisor list",
+  advisorListAria: "Consultant list",
   dataTableAria: "Data table",
   noData: "No data",
   // Status chips
@@ -33,8 +33,8 @@ export default {
   cancel: "Cancel",
   submit: "Submit",
   // Add / edit modal
-  editTitle: "Edit Advisor",
-  addTitle: "Add Advisor",
+  editTitle: "Edit Consultant",
+  addTitle: "Add Consultant",
   fields: {
     username: "Username",
     name: "Name",
@@ -47,14 +47,14 @@ export default {
     enabled: "Enabled",
     accepting: "Accepting",
   },
-  bioPlaceholder: "Advisor introduction",
+  bioPlaceholder: "Consultant introduction",
   uploadPhoto: "Upload (max 3MB)",
   photoAlt: "Preview",
   remove: "Remove",
   noPhoto: "No photo",
   // Delete confirmation
   deleteConfirmTitle: "Confirm Delete",
-  deleteConfirmBody: "Delete advisor \"{name}\"? Advisors with existing appointments cannot be deleted.",
+  deleteConfirmBody: "Delete advisor \"{name}\"? Consultants with existing appointments cannot be deleted.",
   // Toasts
   loadFail: "Fail to load data.",
   photoTooLarge: "Photo must be smaller than 3MB.",

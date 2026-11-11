@@ -1,6 +1,6 @@
 /** Common strings: layout chrome / menus / dialogs / paginator / form controls (common namespace) */
 export default {
-  appName: "SME UGO",
+  appName: "SME UGO Appointment",
   home: "Home",
   logout: "Logout",
   logoutConfirmTitle: "Tips",
@@ -13,21 +13,16 @@ export default {
   hidePassword: "Hide password",
   // Admin menu (AdminLayout)
   menuAdmin: {
-    advisors: "Advisors",
+    advisors: "Consultants",
     schedules: "Schedules",
     appointments: "Appointments",
     feedback: "Feedback",
     stats: "Stats",
     emailLogs: "Email Logs",
   },
-  // Advisor menu (AdvisorLayout)
-  menuAdvisor: {
-    mySchedule: "My Schedule",
-    myAppointments: "My Appointments",
-  },
   // Student menu (UserLayout)
   menuUser: {
-    advisors: "Advisors",
+    advisors: "Consultants",
     myAppointments: "My Appointments",
   },
   // Paginator

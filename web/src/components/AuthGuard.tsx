@@ -7,7 +7,7 @@ interface AuthGuardProps {
   children: React.ReactNode;
   /** 要求登录用户必须具备的角色（如 admin），不满足则跳转登录页 */
   role?: string;
-  /** 允许的角色列表（如 ["admin", "advisor"]），与 role 二选一；同时提供时以 roles 为准 */
+  /** 允许的角色列表（如 ["admin"]），与 role 二选一；同时提供时以 roles 为准 */
   roles?: string[];
   /** 无需登录即可访问的路径（如 SSO 回调页），精确匹配 usePathname() */
   publicPaths?: string[];

@@ -2,7 +2,7 @@
 export default {
   column: {
     applyNo: "Apply No.",
-    advisor: "Advisor",
+    advisor: "Consultant",
     student: "Student",
     time: "Time",
     topic: "Topic",
@@ -11,9 +11,9 @@ export default {
     followup: "Follow-up",
   },
   filter: {
-    advisor: "Advisor",
+    advisor: "Consultant",
     month: "Month",
-    allAdvisors: "All Advisors",
+    allAdvisors: "All Consultants",
   },
   export: "Export",
   needFollowup: "Need follow-up",

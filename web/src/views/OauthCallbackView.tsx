@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button, Spinner, toast } from "@heroui/react";
 import { oauthLoginApi } from "@/api/user";
 import { useUserStore, type UserState } from "@/context/UserContext";
-import { OAUTH_STATE_KEY } from "@/utils/sso";
+import { OAUTH_STATE_KEY, setSsoLoginFlag } from "@/utils/sso";
 import { routeByRole } from "@/views/LoginView";
 
 /**
@@ -39,12 +39,14 @@ export default function OauthCallbackView() {
     }
     sessionStorage.removeItem(OAUTH_STATE_KEY);
 
-    // oauthToken 已废弃，接口层固定传空串；state 仅用于前端 CSRF 校验
-    oauthLoginApi(code)
+    // state 已在上方完成 CSRF 校验，原样回传仅供服务端日志追溯
+    oauthLoginApi(code, state ?? "")
       .then((data) => {
         userStore
           .saveUser({ ...data } as UserState)
           .then(() => {
+            // 标记本会话由 SSO 建立：登出时据此联动 ADFS 单点登出
+            setSsoLoginFlag();
             router.replace(routeByRole(data.role));
           });
       })

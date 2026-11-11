@@ -3,15 +3,15 @@
 使用场景：管理员忘记密码 / 初始化后需要改掉默认口令。
 
 行为：
-- 读取 ops/.env 中的 POSTGRES_* 配置，psycopg2 直连数据库（默认宿主机映射端口 55432）；
+- 读取 ops/.env 中的 DB_* 配置（外部 PostgreSQL），psycopg2 直连数据库；
 - 将目标账号密码更新为 PBKDF2-HMAC-SHA256 哈希（与后端 x_security 同格式）；
 - 同时清空会话 key（置 N/A），强制该账号重新登录；
 - 账号不存在时创建一个 admin 角色账号。
 
 用法：
-    python3 reset_admin_password.py                     # 交互输入新密码，默认账号取 ops/.env 的 PA_ADMIN_USERNAME
+    python3 reset_admin_password.py                     # 交互输入新密码，默认账号取 ops/.env 的 ADMIN_USERNAME
     python3 reset_admin_password.py --username admin    # 指定账号
-    PA_DB_HOST=127.0.0.1 PA_DB_PORT=55432 python3 reset_admin_password.py
+    PA_DB_HOST=10.0.0.5 PA_DB_PORT=5432 python3 reset_admin_password.py   # 环境变量覆盖 ops/.env
 """
 from __future__ import annotations
 
@@ -54,16 +54,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Reset (or create) an admin account password.")
     parser.add_argument(
         "--username",
-        default=env.get("PA_ADMIN_USERNAME", "") or "admin",
-        help="target username (default: PA_ADMIN_USERNAME from ops/.env, else admin)",
+        default=env.get("ADMIN_USERNAME", "") or "admin",
+        help="target username (default: ADMIN_USERNAME from ops/.env, else admin)",
     )
     args = parser.parse_args()
 
-    host = os.environ.get("PA_DB_HOST", "127.0.0.1")
-    port = int(os.environ.get("PA_DB_PORT", "55432"))
-    dbname = env.get("POSTGRES_DB", "id_x_007")
-    user = env.get("POSTGRES_USER", "postgres")
-    password = env.get("POSTGRES_PASSWORD", "postgres")
+    host = os.environ.get("PA_DB_HOST") or env.get("DB_HOST") or "127.0.0.1"
+    port = int(os.environ.get("PA_DB_PORT") or env.get("DB_PORT") or "5432")
+    dbname = env.get("DB_NAME", "id_x_007")
+    user = env.get("DB_USERNAME", "postgres")
+    password = env.get("DB_PASSWORD", "postgres")
 
     new_password = getpass.getpass("New password (>= 6 chars): ")
     if len(new_password) < 6:

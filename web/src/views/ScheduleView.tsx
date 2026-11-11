@@ -28,7 +28,6 @@ const PAGE_SIZE = 20;
 const emptyForm: SlotFormValue = {
   start_time: "",
   end_time: "",
-  quota: "1",
 };
 
 interface ScheduleViewProps {
@@ -91,7 +90,6 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
       setFormValue({
         start_time: msToLocal(row.startTimeMs),
         end_time: msToLocal(row.endTimeMs),
-        quota: String(row.quota ?? "1"),
       });
     } else {
       setIsEdit(false);
@@ -108,10 +106,6 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
     }
     if (formValue.end_time <= formValue.start_time) {
       toast.danger(t("endAfterStart"));
-      return;
-    }
-    if (Number(formValue.quota || 0) < 1) {
-      toast.danger(t("quotaMinOne"));
       return;
     }
     setSubmitting(true);
@@ -196,7 +190,7 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
   const columns = [
     { id: "startTime", name: t("startTime") },
     { id: "endTime", name: t("endTime") },
-    { id: "quota", name: t("bookedQuota") },
+    { id: "booked", name: t("bookedState") },
     { id: "state", name: t("state") },
     { id: "actions", name: t("options") },
   ];
@@ -249,10 +243,10 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
                         return <Table.Cell>{row.startTime}</Table.Cell>;
                       case "endTime":
                         return <Table.Cell>{row.endTime}</Table.Cell>;
-                      case "quota":
+                      case "booked":
                         return (
                           <Table.Cell>
-                            {row.booked} / {row.quota}
+                            {Number(row.booked) > 0 ? t("slotBooked") : t("slotAvailable")}
                           </Table.Cell>
                         );
                       case "state":
@@ -331,12 +325,6 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
                     type="datetime-local"
                     value={formValue.end_time}
                     onChange={(v) => setFormValue((s) => ({ ...s, end_time: v }))}
-                  />
-                  <FormField
-                    label={t("quota")}
-                    type="number"
-                    value={formValue.quota}
-                    onChange={(v) => setFormValue((s) => ({ ...s, quota: v }))}
                   />
                 </div>
               </Modal.Body>

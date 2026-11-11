@@ -3,12 +3,13 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { logoutApi } from "@/api/user";
+import { isSsoLogin, redirectToAdfsLogout } from "@/utils/sso";
 
 export interface UserState {
   username?: string;
   user_id: string;
   token: string; // Token
-  role: string; // student / advisor / admin
+  role: string; // student / admin
   name?: string;
 }
 
@@ -78,11 +79,21 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  /** 登出：本地会话 + 服务端会话失效 */
+  /**
+   * 登出：本地会话 + 服务端会话失效；
+   * SSO 建立的会话额外跳转 ADFS 登出端点终止单点登录会话（防同一浏览器
+   * 下一位使用者点 SSO 按钮直接以上一账号静默登录），完成后回跳登录页。
+   */
   const logout = useCallback(() => {
+    const ssoSession = isSsoLogin();
     invalidateServerSession();
+    // localStorage.clear 已含 SSO 标记（SSO_LOGIN_FLAG）
     localStorage.clear();
     sessionStorage.clear();
+    if (ssoSession) {
+      redirectToAdfsLogout();
+      return;
+    }
     router.push("/f/007/login");
   }, [router, invalidateServerSession]);
 

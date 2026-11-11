@@ -5,7 +5,6 @@ import myAppointments from "./zh/myAppointments";
 import schedule from "./zh/schedule";
 import advisorManagement from "./zh/advisorManagement";
 import stats from "./zh/stats";
-import advisorAppointments from "./zh/advisorAppointments";
 import appointmentManagement from "./zh/appointmentManagement";
 import emailLog from "./zh/emailLog";
 import feedback from "./zh/feedback";
@@ -20,7 +19,6 @@ export const zh = {
   schedule,
   advisorManagement,
   stats,
-  advisorAppointments,
   appointmentManagement,
   emailLog,
   feedback,

@@ -1,26 +1,11 @@
 name: id_x_007
 
-services:
-  db:
-    image: docker.io/library/postgres:18
-    container_name: id_x_007_db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      TZ: Asia/Shanghai
-    ports:
-      - "55432:5432"
-    volumes:
-      - id_x_007_db_data:/var/lib/postgresql
-      - ./init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+# 数据库：不再内置 PostgreSQL 容器，service 直连外部库（连接参数见 ops/.env 的 DB_*）。
+# 表结构与预置数据（管理员 / 邮件模板 / SSO 配置）由应用启动时幂等创建，
+# ops/init/*.sql 仅作手动初始化外部库的参考。
+# 若外部库在容器宿主机本机，DB_HOST 填 host.containers.internal 或宿主机内网 IP。
 
+services:
   service:
     build:
       context: ../../..
@@ -29,34 +14,19 @@ services:
     container_name: id_x_007_service
     restart: unless-stopped
     environment:
-      DB_NAME: ${POSTGRES_DB}
-      DB_HOST: db
-      DB_PORT: "5432"
-      DB_USERNAME: ${POSTGRES_USER}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      PA_ADMIN_USERNAME: ${PA_ADMIN_USERNAME:-}
-      PA_ADMIN_PASSWORD: ${PA_ADMIN_PASSWORD:-}
-      PA_OAUTH_CLIENT_ID: ${PA_OAUTH_CLIENT_ID:-}
-      PA_OAUTH_CLIENT_SECRET: ${PA_OAUTH_CLIENT_SECRET:-}
-      PA_OAUTH_REDIRECT_URI: ${PA_OAUTH_REDIRECT_URI:-}
-      PA_OAUTH_MOCK: ${PA_OAUTH_MOCK:-}
-      PA_SMTP_HOST: ${PA_SMTP_HOST:-}
-      PA_SMTP_PORT: ${PA_SMTP_PORT:-587}
-      PA_SMTP_USER: ${PA_SMTP_USER:-}
-      PA_SMTP_PASSWORD: ${PA_SMTP_PASSWORD:-}
-      PA_MAIL_FROM: ${PA_MAIL_FROM:-}
-      PA_SCHEDULER_DISABLED: ${PA_SCHEDULER_DISABLED:-}
-      PA_MAX_UPLOAD_BYTES: ${PA_MAX_UPLOAD_BYTES:-}
-      PA_AUDIT_RETAIN_DAYS: ${PA_AUDIT_RETAIN_DAYS:-90}
+      DB_NAME: ${DB_NAME}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       PROJECT_PATH: /app/i-Core
       TZ: Asia/Shanghai
     volumes:
       # 日志挂载:宿主机 x_models/id_x_007/logs -> 容器日志目录 /app/i-Core/logs
       # (日志路径由 utils/log_util.py 按 PROJECT_PATH + config 中 logs/*.log 解析)
       - ../logs:/app/i-Core/logs
-    depends_on:
-      db:
-        condition: service_healthy
 
   web:
     build:
@@ -84,6 +54,3 @@ services:
     depends_on:
       - service
       - web
-
-volumes:
-  id_x_007_db_data:

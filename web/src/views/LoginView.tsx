@@ -6,14 +6,13 @@ import { useTranslations } from "next-intl";
 import { Button, InputGroup, TextField, toast } from "@heroui/react";
 import { loginApi, registerApi } from "@/api/user";
 import { useUserStore, type UserState } from "@/context/UserContext";
-import { redirectToAdfsAuthorize } from "@/utils/sso";
+import { clearSsoLoginFlag, redirectToAdfsAuthorize } from "@/utils/sso";
 import LanguageToggle from "@/i18n/LanguageToggle";
 import PasswordInput from "@/components/pa/PasswordInput";
 
 /** 登录成功后按角色跳转 */
 export const routeByRole = (role: string): string => {
   if (role === "admin") return "/f/007/admin/advisor-management";
-  if (role === "advisor") return "/f/007/advisor/schedule";
   return "/f/007/user/advisors";
 };
 
@@ -26,7 +25,7 @@ interface CaptchaData {
 
 export default function LoginView() {
   const t = useTranslations("login");
-  // login：管理员/顾问账密登录；register：管理员注册（注册后待运维激活）
+  // login：管理员账密登录；register：管理员注册（注册后待运维激活）
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -75,6 +74,8 @@ export default function LoginView() {
       captcha_code: captchaCode,
     })
       .then((data) => {
+        // 密码登录：确保不残留 SSO 会话标记，登出时不会误跳 ADFS
+        clearSsoLoginFlag();
         userStore
           .saveUser({
             ...data,
@@ -269,7 +270,7 @@ export default function LoginView() {
               </div>
               {!isRegister && (
                 <>
-                  {/* 学生 / 顾问走 CUHK ADFS 单点登录（授权码流） */}
+                  {/* 学生走 CUHK ADFS 单点登录（授权码流）；顾问不设登录入口 */}
                   <div className="my-3 flex items-center gap-3 text-xs text-gray-400">
                     <div className="flex-1 border-t border-gray-300" />
                     {t("or")}

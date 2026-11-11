@@ -1,9 +1,9 @@
 /** Login / register page strings (login namespace) */
 export default {
   brand: "UGO",
-  brandSub: "Peer Advisor Consultation & Appointment Booking",
+  brandSub: "Peer Consultant Consultation & Appointment Booking",
   brandSlogan: "Book one-on-one consultations with peer advisors anytime.",
-  title: "UGO Peer Advisor Appointment",
+  title: "UGO Appointment Platform",
   loginTitle: "Login",
   registerTitle: "Admin Register",
   user: "Username",

@@ -17,7 +17,7 @@ export default {
   loadingSlots: "正在加载时段",
   stepForm: "2. 填写信息",
   full: "已约满",
-  bookedCount: "已约 {booked}/{quota}",
+  available: "可预约",
   topic: "主题",
   topicRequired: "主题 *",
   topicPlaceholder: "咨询主题",

@@ -314,7 +314,7 @@ export default function AdvisorBrowseView() {
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
                     {slots.map((s) => {
-                      const full = Number(s.booked) >= Number(s.quota);
+                      const full = Number(s.booked) > 0;
                       const selected = selectedSlotId === s.slotId;
                       return (
                         <button
@@ -333,7 +333,7 @@ export default function AdvisorBrowseView() {
                           <div>{s.startTime}</div>
                           <div>~ {s.endTime}</div>
                           <div className="mt-1">
-                            {full ? t("full") : t("bookedCount", { booked: s.booked, quota: s.quota })}
+                            {full ? t("full") : t("available")}
                           </div>
                         </button>
                       );

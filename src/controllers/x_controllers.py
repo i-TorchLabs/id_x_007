@@ -9,10 +9,8 @@ from strawberry.types import Info
 
 from x_models.id_x_007.src.schemas.x_schemas import (
     AcceptingSetInput,
-    AdvisorAppointmentListInput,
     AdvisorCancelInput,
     AdvisorCompleteInput,
-    AdvisorExportInput,
     AdvisorIdInput,
     AdvisorListInput,
     AdvisorPageInput,
@@ -69,22 +67,14 @@ class Query:
     def my_appointment_list(self, info: Info, data: PageInput) -> ApiResponse:
         return x_views.view_my_appointment_list(info, data)
 
-    # ----- 顾问端 · 排期与预约 -----
-    @strawberry.field(description="顾问排期列表（含暂停时段；admin 需传 advisorId 代管）")
+    # ----- 排期与预约（管理端代管） -----
+    @strawberry.field(description="排期列表（admin 代管，须指定 advisorId；含暂停时段）")
     def advisor_my_slot_list(self, info: Info, data: AdvisorPageInput) -> ApiResponse:
         return x_views.view_advisor_my_slot_list(info, data)
 
-    @strawberry.field(description="顾问预约列表（可按状态筛选；admin 需传 advisorId 代管）")
-    def advisor_my_appointment_list(self, info: Info, data: AdvisorAppointmentListInput) -> ApiResponse:
-        return x_views.view_advisor_my_appointment_list(info, data)
-
-    @strawberry.field(description="批量排期模板下载（xlsx：日期/开始时间/结束时间/名额）")
+    @strawberry.field(description="批量排期模板下载（xlsx：日期/开始时间/结束时间）")
     def advisor_slot_template(self, info: Info) -> FileResponse:
         return x_views.view_advisor_slot_template(info)
-
-    @strawberry.field(description="顾问个人历史预约导出（Excel，base64）")
-    def advisor_my_export(self, info: Info, data: AdvisorExportInput) -> FileResponse:
-        return x_views.view_advisor_my_export(info, data)
 
     # ----- 管理后台 -----
     @strawberry.field(description="顾问列表（分页，keyword 匹配姓名/用户名/专业/方向，仅 admin）")
@@ -123,7 +113,7 @@ class Query:
 @strawberry.type
 class Mutation:
     # ----- 认证 -----
-    @strawberry.mutation(description="账号密码登录（仅 admin/advisor；RSA 加密凭据/验证码/防爆破锁定）")
+    @strawberry.mutation(description="账号密码登录（仅 admin；RSA 加密凭据/验证码/防爆破锁定）")
     def login(self, info: Info, data: LoginInput) -> ApiResponse:
         return x_views.view_login(info, data)
 
@@ -140,54 +130,54 @@ class Mutation:
         return x_views.view_oauth_login(info, data)
 
     # ----- 学生端 · 预约 -----
-    @strawberry.mutation(description="学生预约（24h 截止/行锁名额校验/重复预约拦截/双方邮件通知）")
+    @strawberry.mutation(description="学生预约（24h 截止/行锁占用校验/重复预约拦截/双方邮件通知）")
     def student_appointment_create(self, info: Info, data: AppointmentCreateInput) -> ApiResponse:
         return x_views.view_student_appointment_create(info, data)
 
-    @strawberry.mutation(description="学生取消预约（开始前 4 小时内禁止；双方邮件通知）")
+    @strawberry.mutation(description="学生取消预约（须填取消原因；开始前 4 小时内禁止；双方邮件通知）")
     def student_appointment_cancel(self, info: Info, data: AppointmentIdInput) -> ApiResponse:
         return x_views.view_student_appointment_cancel(info, data)
 
-    # ----- 顾问端 · 排期 -----
-    @strawberry.mutation(description="新增咨询时段（advisor 本人 / admin 代管）")
+    # ----- 排期管理（管理端代管） -----
+    @strawberry.mutation(description="新增咨询时段（admin 代管，须指定 advisorId）")
     def advisor_slot_create(self, info: Info, data: SlotCreateInput) -> ApiResponse:
         return x_views.view_advisor_slot_create(info, data)
 
-    @strawberry.mutation(description="修改咨询时段（名额不得小于已订数）")
+    @strawberry.mutation(description="修改咨询时段（起止时间，admin 代管）")
     def advisor_slot_update(self, info: Info, data: SlotUpdateInput) -> ApiResponse:
         return x_views.view_advisor_slot_update(info, data)
 
-    @strawberry.mutation(description="删除咨询时段（存在有效预约时拒绝）")
+    @strawberry.mutation(description="删除咨询时段（存在有效预约时拒绝，admin 代管）")
     def advisor_slot_delete(self, info: Info, data: SlotIdInput) -> ApiResponse:
         return x_views.view_advisor_slot_delete(info, data)
 
-    @strawberry.mutation(description="暂停/恢复咨询时段")
+    @strawberry.mutation(description="暂停/恢复咨询时段（admin 代管）")
     def advisor_slot_state(self, info: Info, data: SlotStateInput) -> ApiResponse:
         return x_views.view_advisor_slot_state(info, data)
 
-    @strawberry.mutation(description="批量上传排期（xlsx，逐行校验并返回成功/失败行报告）")
+    @strawberry.mutation(description="批量上传排期（xlsx，逐行校验并返回成功/失败行报告，admin 代管）")
     def advisor_slot_batch_upload(self, info: Info, data: SlotBatchUploadInput) -> ApiResponse:
         return x_views.view_advisor_slot_batch_upload(info, data)
 
-    @strawberry.mutation(description="设置「暂不接待」整体开关")
+    @strawberry.mutation(description="设置顾问「暂不接待」整体开关（admin 代管）")
     def advisor_accepting_set(self, info: Info, data: AcceptingSetInput) -> ApiResponse:
         return x_views.view_advisor_accepting_set(info, data)
 
-    # ----- 顾问端 · 预约处理 -----
-    @strawberry.mutation(description="顾问取消预约（须填原因；开始前 4 小时内禁止；双方邮件通知）")
+    # ----- 预约处理与反馈（管理端代管） -----
+    @strawberry.mutation(description="管理端代顾问取消预约（须填原因；开始前 4 小时内禁止；双方邮件通知）")
     def advisor_appointment_cancel(self, info: Info, data: AdvisorCancelInput) -> ApiResponse:
         return x_views.view_advisor_appointment_cancel(info, data)
 
-    @strawberry.mutation(description="标记咨询完成（开始时间已过方可标记）")
+    @strawberry.mutation(description="标记咨询完成（开始时间已过方可标记，admin 代管）")
     def advisor_appointment_complete(self, info: Info, data: AdvisorCompleteInput) -> ApiResponse:
         return x_views.view_advisor_appointment_complete(info, data)
 
-    @strawberry.mutation(description="填写/更新咨询反馈（仅 completed 预约，upsert）")
+    @strawberry.mutation(description="填写/更新咨询反馈（仅 completed 预约，upsert，admin 代管）")
     def feedback_set(self, info: Info, data: FeedbackSetInput) -> ApiResponse:
         return x_views.view_feedback_set(info, data)
 
     # ----- 管理后台 · 顾问管理 -----
-    @strawberry.mutation(description="创建顾问（建 SSO 登录账号 + 顾问档案，仅 admin）")
+    @strawberry.mutation(description="创建顾问（仅建顾问档案，不建用户账号，仅 admin）")
     def manage_advisor_create(self, info: Info, data: ManageAdvisorCreateInput) -> ApiResponse:
         return x_views.view_manage_advisor_create(info, data)
 

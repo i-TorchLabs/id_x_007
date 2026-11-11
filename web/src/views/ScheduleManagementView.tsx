@@ -8,7 +8,7 @@ import type { MySlot } from "@/api/advisor";
 import SelectField from "@/components/pa/SelectField";
 import ScheduleView from "@/views/ScheduleView";
 
-/** D-2 排期代管：选中顾问后复用顾问端排期管理（接口均带 advisorId） */
+/** D-2 排期代管：选中顾问后管理其排期（接口均带 advisorId；顾问无登录入口） */
 export default function ScheduleManagementView() {
   const t = useTranslations("schedule");
   const [advisors, setAdvisors] = useState<ManageAdvisor[]>([]);

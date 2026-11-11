@@ -1,9 +1,9 @@
 /** 登录/注册页文案（login 命名空间） */
 export default {
   brand: "UGO",
-  brandSub: "朋辈顾问咨询与预约平台",
-  brandSlogan: "随时预约朋辈顾问的一对一咨询。",
-  title: "UGO 朋辈顾问预约",
+  brandSub: "咨询与预约平台",
+  brandSlogan: "随时预约的一对一咨询。",
+  title: "UGO 咨询预约平台",
   loginTitle: "登录",
   registerTitle: "管理员注册",
   user: "用户名",
@@ -28,7 +28,7 @@ export default {
   goRegister: "去注册",
   or: "或",
   ssoLogin: "香港中文大学统一认证登录",
-  ssoTip: "学生与朋辈顾问请使用 CUHK 统一认证登录。",
+  ssoTip: "学生与请使用 CUHK 统一认证登录。",
   // 校验与提示
   validation: {
     required: "邮箱、姓名和密码为必填项",

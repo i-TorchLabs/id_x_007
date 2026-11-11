@@ -1,13 +1,15 @@
 """数据层：ORM 模型 + Base + 全局会话工厂（引擎启动时注入）。
 
-UGO 朋辈顾问咨询预约系统（id_x_007），表前缀 pa_：
-- pa_user        用户账号（admin / advisor / student，student 仅可 SSO 登录）
-- pa_advisor     朋辈顾问档案（关联 pa_user，含擅长方向 / 简介 / 照片）
-- pa_slot        咨询时段（顾问自管排期，默认名额 1 人）
+UGO 咨询预约系统（id_x_007），表前缀 pa_：
+- pa_user        用户账号（admin / student，student 仅可 SSO 登录）
+- pa_advisor     档案（独立建档不落 pa_user，含账号标识 / 邮箱 / 擅长方向 / 简介 / 照片）
+- pa_slot        咨询时段（管理端代管发布，每时段 1 人）
 - pa_appointment 预约记录（预约单号 A+8 位数字）
-- pa_feedback    咨询反馈（与预约一一对应，仅顾问 / 管理员可见）
+- pa_feedback    咨询反馈（与预约一一对应，仅管理员可见）
 - pa_email_log   邮件发送日志（booked / cancelled / reminder）
 - pa_mail_template 邮件模板（库表驱动，管理员可配置文案，缺失时代码内回退默认）
+- pa_sso_settings SSO 单点登录配置（取代 .env 的 PA_OAUTH_* 配置，取 id 最小行生效）
+- pa_smtp_settings SMTP 邮件配置（取代 .env 的 PA_SMTP_* 配置，取 id 最小行生效）
 """
 from __future__ import annotations
 
@@ -36,7 +38,25 @@ def get_session() -> sessionmaker[Session]:
     return _session_maker
 
 
-# ===== 业务模型区（UGO 朋辈顾问咨询预约系统） =====
+# ==========================================
+# SSO 配置缓存，由 views.load_oauth_config() 从 pa_sso_settings 表读取后注入
+# （参考 id_x_010 的 sso_settings 实现）
+# ==========================================
+_oauth_config: dict | None = None
+
+
+def set_oauth_config(config: dict | None) -> None:
+    """由 views 层调用，将 pa_sso_settings 表读取结果注入全局缓存。"""
+    global _oauth_config
+    _oauth_config = config
+
+
+def get_oauth_config() -> dict | None:
+    """获取 SSO 配置缓存，供 view_oauth_login 同步读取。"""
+    return _oauth_config
+
+
+# ===== 业务模型区（UGO 咨询预约系统） =====
 
 
 class PaUser(Base):
@@ -47,7 +67,7 @@ class PaUser(Base):
     username: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", unique=True, comment="用户名（SSO 用户为 upn/邮箱）")
     password: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="密码（PBKDF2 哈希，SSO 用户为 N/A）")
     key: Mapped[str] = mapped_column(Text, nullable=False, default="N/A", comment="会话密钥（Token）")
-    role: Mapped[str] = mapped_column(String(255), nullable=False, default="student", comment="角色(student/advisor/admin)")
+    role: Mapped[str] = mapped_column(String(255), nullable=False, default="student", comment="角色(student/admin)")
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="姓名")
     email: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="邮箱")
     state: Mapped[str] = mapped_column(String(255), nullable=False, default="1", comment="状态(1启用/0停用)")
@@ -58,13 +78,14 @@ class PaUser(Base):
 
 class PaAdvisor(Base):
     __tablename__ = "pa_advisor"
-    __table_args__ = {"comment": "朋辈顾问档案表"}
+    __table_args__ = {"comment": "档案表"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("pa_user.id"), nullable=False, unique=True, comment="用户ID"
+    username: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="N/A", unique=True, comment="账号标识（CUHK 邮箱/upn，仅用于标识，不提供登录）"
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="姓名")
+    email: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="邮箱")
     grade: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="年级")
     major: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="专业")
     direction: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="擅长方向")
@@ -86,7 +107,6 @@ class PaSlot(Base):
     )
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="开始时间")
     end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="结束时间")
-    quota: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="名额")
     booked: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已订数")
     state: Mapped[str] = mapped_column(String(255), nullable=False, default="1", comment="状态(1开放/0暂停)")
     create_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="创建时间")
@@ -164,24 +184,65 @@ class PaMailTemplate(Base):
     update_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="更新时间")
 
 
+class PaSsoSettings(Base):
+    """SSO 单点登录配置（取 id 最小行作为当前生效配置）。
+
+    参考 id_x_010 的 sso_settings：取代原 .env 的 PA_OAUTH_CLIENT_ID /
+    PA_OAUTH_CLIENT_SECRET / PA_OAUTH_REDIRECT_URI 配置项；由 views 层
+    读入缓存。client_secret 仅服务端持有，绝不进入前端代码。
+    """
+
+    __tablename__ = "pa_sso_settings"
+    __table_args__ = {"comment": "SSO 单点登录配置表"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
+    client_id: Mapped[str] = mapped_column(String(128), nullable=False, comment="ADFS 分配的 Client ID")
+    client_secret: Mapped[str] = mapped_column(String(256), nullable=False, comment="ADFS 共享秘钥（明文，仅服务端持有）")
+    redirect_uri: Mapped[str] = mapped_column(String(256), nullable=False, comment="OAuth2 回调地址（须与 ADFS 注册一致）")
+    create_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="更新时间")
+
+
+class PaSmtpSettings(Base):
+    """SMTP 邮件配置（取 id 最小行作为当前生效配置）。
+
+    取代原 .env 的 PA_SMTP_HOST / PA_SMTP_PORT / PA_SMTP_USER /
+    PA_SMTP_PASSWORD / PA_MAIL_FROM 配置项；x_mail 发信时实时读表，
+    运行期改表即生效。host / username / password 任一为空视为未配置，
+    发送降级为 skipped 落库。
+    """
+
+    __tablename__ = "pa_smtp_settings"
+    __table_args__ = {"comment": "SMTP 邮件配置表"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
+    host: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="SMTP 服务器地址")
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=587, comment="SMTP 端口（默认 587 STARTTLS）")
+    username: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="SMTP 登录账号")
+    password: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="SMTP 登录口令（仅服务端持有）")
+    mail_from: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="发件人地址（空则取 username）")
+    create_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="更新时间")
+
+
 def seed_initial_admin(conn: Connection) -> None:
     """播种初始管理员账号（幂等，按用户名判重）。
 
-    - 账号：环境变量 PA_ADMIN_USERNAME（默认 admin）；
-      口令：PA_ADMIN_PASSWORD（默认 admin123）；
+    - 账号：环境变量 ADMIN_USERNAME（默认 admin）；
+      口令：ADMIN_PASSWORD（默认 admin123）；
     - 用户名为邮箱格式时同步写入 email 字段，姓名取 @ 前局部部分；
     - 口令以 PBKDF2 哈希落库（见 utils/x_security.py）；
     - 目标用户名已存在（任意角色）则跳过，避免重复播种或覆盖既有账号。
     """
     from x_models.id_x_007.src.utils.x_security import hash_password
 
-    username = (os.environ.get("PA_ADMIN_USERNAME", "")).strip() or "admin"
+    username = (os.environ.get("ADMIN_USERNAME", "")).strip() or "admin"
     existing = conn.execute(
         select(PaUser.id).where(PaUser.username == username).limit(1)
     ).first()
     if existing:
         return
-    password = os.environ.get("PA_ADMIN_PASSWORD", "") or "admin123"
+    password = os.environ.get("ADMIN_PASSWORD", "") or "admin123"
     is_email = "@" in username
     conn.execute(
         insert(PaUser).values(
@@ -193,6 +254,49 @@ def seed_initial_admin(conn: Connection) -> None:
             email=username if is_email else "N/A",
             state="1",
             is_active=True,
+            create_time=datetime.now(),
+            update_time=datetime.now(),
+        )
+    )
+
+
+def seed_sso_settings(conn: Connection) -> None:
+    """播种 CUHK ADFS SSO 配置（幂等：pa_sso_settings 已有数据则跳过）。
+
+    与 ops/init/03_sso.sql 等价；连接外部数据库时 init SQL 不会自动执行，
+    由本函数在建表后兜底写入。如需更换凭据，直接改表即可（运行期生效，
+    不会被本函数覆盖）。
+    """
+    existing = conn.execute(select(PaSsoSettings.id).limit(1)).first()
+    if existing:
+        return
+    conn.execute(
+        insert(PaSsoSettings).values(
+            client_id="2e8949a0-7fd4-4c7a-a380-c9e93c103067",
+            client_secret="jEhpM4HPaUX1OdOgNp5HvvRHnuqClYYoIvSozlKb",
+            redirect_uri="https://sme-ugo-appointment.cuhk.edu.cn/f/007/user/oauth2",
+            create_time=datetime.now(),
+            update_time=datetime.now(),
+        )
+    )
+
+
+def seed_smtp_settings(conn: Connection) -> None:
+    """播种 SMTP 配置空白行（幂等：pa_smtp_settings 已有数据则跳过）。
+
+    预置一行空配置便于运维直接 UPDATE 填写；host/username/password
+    为空时发信降级为 skipped 落库，不影响业务主流程。
+    """
+    existing = conn.execute(select(PaSmtpSettings.id).limit(1)).first()
+    if existing:
+        return
+    conn.execute(
+        insert(PaSmtpSettings).values(
+            host="",
+            port=587,
+            username="",
+            password="",
+            mail_from="",
             create_time=datetime.now(),
             update_time=datetime.now(),
         )

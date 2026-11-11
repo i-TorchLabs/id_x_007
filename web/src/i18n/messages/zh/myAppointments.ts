@@ -15,6 +15,8 @@ export default {
   confirmCancelTitle: "确认取消",
   confirmCancelBody:
     "确认取消与 {advisorName} 的预约（申请编号 {applyNo}）吗？预约仅可在开始前至少 4 小时取消。",
+  cancelReasonPlaceholder: "请填写取消原因（必填）",
+  cancelReasonHint: "取消原因将同步告知顾问并记录在案。",
   back: "返回",
   confirm: "确认",
   failToLoad: "数据加载失败。",

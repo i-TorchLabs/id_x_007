@@ -2,7 +2,7 @@ import { callApi, graphqlRequest, parseData, type ApiResponse } from "./graphql"
 import { encryptLoginCredentials } from "@/utils/crypto";
 
 /**
- * 学生端 + 认证 GraphQL API（朋辈顾问咨询预约系统）
+ * 学生端 + 认证 GraphQL API（咨询预约系统）
  * 说明:
  * - 字段名遵循 Strawberry 默认 camelCase 规则
  * - ApiResponse.data 为 JSON 字符串，由 callApi/parseData 统一解析
@@ -89,13 +89,13 @@ export const registerApi = async (data: {
  *  oauthToken 为后端保留的旧隐式流字段（已废弃），固定传空串；
  *  state 仅用于前端 CSRF 校验，不回传后端。
  */
-export const oauthLoginApi = async (code: string) => {
+export const oauthLoginApi = async (code: string, state = "") => {
   return await callApi<LoginData>(
     "oauthLogin",
     `mutation OauthLogin($data: OauthInput!) {
       oauthLogin(data: $data) { code msg data }
     }`,
-    { data: { code, oauthToken: "" } }
+    { data: { code, state } }
   );
 };
 
@@ -124,7 +124,6 @@ export interface AdvisorSlot {
   slotId: string;
   startTime: string;
   endTime: string;
-  quota: string;
   booked: string;
 }
 
@@ -233,13 +232,16 @@ export const studentAppointmentCreateApi = async (data: AppointmentCreateForm) =
   );
 };
 
-/** 取消我的预约（开始前 4 小时内后端会拒绝） */
-export const studentAppointmentCancelApi = async (appointmentId: string | number) => {
+/** 取消我的预约（须填取消原因；开始前 4 小时内后端会拒绝） */
+export const studentAppointmentCancelApi = async (
+  appointmentId: string | number,
+  reason: string
+) => {
   return await callApi(
     "studentAppointmentCancel",
     `mutation StudentAppointmentCancel($data: AppointmentIdInput!) {
       studentAppointmentCancel(data: $data) { code msg data }
     }`,
-    { data: { appointmentId: Number(appointmentId) || 0 } }
+    { data: { appointmentId: Number(appointmentId) || 0, reason } }
   );
 };

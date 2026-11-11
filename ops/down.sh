@@ -4,8 +4,8 @@ set -euo pipefail
 
 PLUGIN="id_x_007"
 
-# 1. 逆序停止并删除容器
-for c in haproxy web service db; do
+# 1. 逆序停止并删除容器（数据库为外部库，不在清理范围）
+for c in haproxy web service; do
     if podman container exists "${PLUGIN}_${c}"; then
         podman stop "${PLUGIN}_${c}" || true
         podman rm "${PLUGIN}_${c}"

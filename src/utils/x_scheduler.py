@@ -6,12 +6,11 @@
   pg_try_advisory_lock(775200721)，拿不到锁说明其他 worker 正在/已经发送，直接跳过；
 - 业务逻辑为同步 Session（与 views 同范式），经 asyncio.to_thread 跑在线程池中，
   不阻塞事件循环；
-- 环境变量 PA_SCHEDULER_DISABLED=1 可整体关闭（如多实例部署时只保留一个实例开启）。
+- 默认开启；多实例部署时注意仅保留一个实例运行本插件以避免重复发信。
 """
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -88,9 +87,8 @@ def _send_tomorrow_reminders() -> None:
                 student = session.execute(
                     select(PaUser).where(PaUser.id == appt.student_user_id)
                 ).scalars().first()
-                advisor_user = session.execute(
-                    select(PaUser).where(PaUser.id == advisor.user_id)
-                ).scalars().first() if advisor else None
+                # 顾问邮箱直接取档案（pa_advisor.email，不再关联 pa_user）
+                advisor_email = advisor.email if advisor else ""
                 # 主题与正文经 pa_mail_template 渲染（管理员可配置），缺失回退内置默认
                 subject, content = render_mail(session, "reminder", {
                     "intro": "您有一条明日的朋辈咨询预约，请准时参加：",
@@ -106,8 +104,8 @@ def _send_tomorrow_reminders() -> None:
                 })
                 if student:
                     send_mail(session, student.email, "reminder", subject, content, appt.id)
-                if advisor_user:
-                    send_mail(session, advisor_user.email, "reminder", subject, content, appt.id)
+                if advisor_email and advisor_email != "N/A":
+                    send_mail(session, advisor_email, "reminder", subject, content, appt.id)
             session.commit()
         except Exception as e:
             logger.error(f"提醒调度执行失败: {e}")
@@ -140,15 +138,11 @@ async def _scheduler_loop() -> None:
 
 
 def start_scheduler() -> None:
-    """启动后台调度任务（幂等）。
+    """启动后台调度任务（幂等，默认开启）。
 
-    - PA_SCHEDULER_DISABLED=1 时不启动；
-    - 当前线程无运行中事件循环（如同步脚本 / 容器全局同步部署）时静默跳过。
+    当前线程无运行中事件循环（如同步脚本 / 容器全局同步部署）时静默跳过。
     """
     global _task
-    if os.environ.get("PA_SCHEDULER_DISABLED", "") == "1":
-        logger.info("提醒调度器已禁用（PA_SCHEDULER_DISABLED=1）")
-        return
     if _task is not None and not _task.done():
         return
     try:

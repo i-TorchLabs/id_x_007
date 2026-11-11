@@ -1,11 +1,11 @@
-/** Advisor browse page strings (advisorBrowse namespace) */
+/** Consultant browse page strings (advisorBrowse namespace) */
 export default {
   // Filter toolbar
   all: "All",
   major: "Major",
   direction: "Direction",
   loading: "Loading",
-  // Advisor cards
+  // Consultant cards
   noAdvisors: "No advisors found",
   unavailable: "Unavailable",
   noBio: "No introduction yet.",
@@ -17,7 +17,7 @@ export default {
   loadingSlots: "Loading slots",
   stepForm: "2. Fill in details",
   full: "Full",
-  bookedCount: "Booked {booked}/{quota}",
+  available: "Available",
   topic: "Topic",
   topicRequired: "Topic *",
   topicPlaceholder: "Consultation topic",

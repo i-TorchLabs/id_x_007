@@ -3,8 +3,9 @@ export default {
   // 表头与表单字段
   startTime: "开始时间",
   endTime: "结束时间",
-  quota: "名额",
-  bookedQuota: "已约/名额",
+  bookedState: "预约情况",
+  slotBooked: "已预约",
+  slotAvailable: "未预约",
   state: "状态",
   options: "操作",
   // 工具栏
@@ -39,7 +40,6 @@ export default {
   loadFail: "加载数据失败。",
   timeRequired: "开始时间和结束时间为必填项。",
   endAfterStart: "结束时间必须晚于开始时间。",
-  quotaMinOne: "名额至少为 1。",
   saved: "保存成功。",
   saveFail: "保存失败。",
   slotPaused: "时段已暂停。",

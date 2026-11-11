@@ -3,7 +3,7 @@ export default {
   tableLabel: "My appointments",
   dataTableLabel: "data table",
   colApplyNo: "Apply No.",
-  colAdvisor: "Advisor",
+  colAdvisor: "Consultant",
   colTime: "Time",
   colTopic: "Topic",
   colMode: "Mode",
@@ -15,6 +15,8 @@ export default {
   confirmCancelTitle: "Confirm Cancel",
   confirmCancelBody:
     "Cancel appointment \"{applyNo}\" with {advisorName}? Appointments can only be cancelled at least 4 hours before the start time.",
+  cancelReasonPlaceholder: "Reason for cancellation (required)",
+  cancelReasonHint: "The reason will be shared with the consultant and kept on record.",
   back: "Back",
   confirm: "Confirm",
   failToLoad: "Fail to load data.",

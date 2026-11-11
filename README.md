@@ -1,6 +1,6 @@
 <div align="center">
 
-# id_x_007: UGO 朋辈顾问咨询预约系统
+# id_x_007: UGO 咨询预约系统
 
 **顾问建档 — 排期发布 — 学生预约 — 邮件提醒 — 反馈统计，一站式朋辈咨询预约平台**
 
@@ -16,27 +16,27 @@
 
 ## 1. 简介 (Introduction)
 
-- **Slogan**: 为高校朋辈辅导场景打造的排期与预约一站式平台 —— 顾问自管排期，学生一键预约，系统自动提醒。
-- **Description**: id_x_007 是运行于 **i-Core 可插拔内核**之上的业务插件模块，面向大学生事务办公室（UGO, University General Office）的朋辈顾问（Peer Advisor）咨询业务。系统打通「顾问建档 → 排期发布（单条新增 / Excel 批量导入）→ 学生浏览预约 → 每日定时提醒 → 取消 / 完成 / 反馈 → 运营统计导出」完整业务闭环。后端以 Litestar + Strawberry GraphQL 暴露单一 GraphQL 端点（`/b/id_x_007/graphql`），数据落 PostgreSQL `pa_*` 七张业务表；前端为 Next.js App Router + HeroUI 的中英双语站点（路由前缀 `/f/007`）；入口由 HAProxy 统一按路径分流。相比通用预约工具，本系统内建 CUHK ADFS 统一身份认证（OAuth2 授权码流）、数据库行级锁防超订、库表驱动的邮件模板体系与 advisory lock 防重的定时提醒调度器，可在多 worker 生产环境下直接部署。
+- **Slogan**: 为高校朋辈辅导场景打造的排期与预约一站式平台 —— 管理端统一排期，学生一键预约，系统自动提醒。
+- **Description**: id_x_007 是运行于 **i-Core 可插拔内核**之上的业务插件模块，面向大学生事务办公室（UGO, University General Office）的朋辈顾问（Peer Consultant）咨询业务。系统打通「顾问建档 → 排期发布（单条新增 / Excel 批量导入）→ 学生浏览预约 → 每日定时提醒 → 取消 / 完成 / 反馈 → 运营统计导出」完整业务闭环。后端以 Litestar + Strawberry GraphQL 暴露单一 GraphQL 端点（`/b/id_x_007/graphql`），数据落 PostgreSQL `pa_*` 七张业务表；前端为 Next.js App Router + HeroUI 的中英双语站点（路由前缀 `/f/007`）；入口由 HAProxy 统一按路径分流。相比通用预约工具，本系统内建 CUHK ADFS 统一身份认证（OAuth2 授权码流）、数据库行级锁防超订、库表驱动的邮件模板体系与 advisory lock 防重的定时提醒调度器，可在多 worker 生产环境下直接部署。
 
 ## 2. 核心特性 (Features)
 
-- **顾问建档与排期管理**：管理员创建顾问档案（年级 / 专业 / 擅长方向 / 简介 / 照片），顾问自管咨询时段，支持单条增删改、暂停 / 恢复、「暂不接待」整体开关，以及 Excel（.xlsx）批量导入排期（逐行校验、失败行报告、同时段 upsert）。
-- **学生浏览与预约**：按专业 / 方向筛选顾问卡片，查看未来可约时段；预约须在开始前 24 小时之前提交，取消（学生 / 顾问侧）在开始前 4 小时内禁止；名额与重复预约经数据库行级锁（`SELECT ... FOR UPDATE`）校验，并发下不超订。
+- **顾问建档与排期管理**：管理员创建顾问档案（年级 / 专业 / 擅长方向 / 简介 / 照片），并在「排期管理」中代管各顾问的咨询时段：单条增删改、暂停 / 恢复、「暂不接待」整体开关，以及 Excel（.xlsx）批量导入排期（逐行校验、失败行报告、同时段 upsert）。
+- **学生浏览与预约**：按专业 / 方向筛选顾问卡片，查看未来可约时段；预约须在开始前 24 小时之前提交，取消（学生侧 / 管理端代顾问）须填写取消原因、在开始前 4 小时内禁止；时段占用（每时段 1 人）与重复预约经数据库行级锁（`SELECT ... FOR UPDATE`）校验，并发下不超订。
 - **三类邮件通知**：预约成功（booked）、取消（cancelled）、每日提醒（reminder）三类邮件经 `pa_mail_template` 库表模板渲染（管理员可在线配置文案，缺失回退内置默认），发送结果无论成败均落库 `pa_email_log` 登记；每日 21:00（Asia/Shanghai）调度器扫描次日预约发送提醒，以 PostgreSQL advisory lock 防多 worker 重复发送。
-- **双通道身份认证**：学生 / 顾问经 CUHK ADFS 统一身份认证（OAuth2 授权码流，id_token 服务端验签，首次登录自动建档）；管理员账号密码登录采用 RSA-2048 传输加密 + 防爆破锁定（默认 5 次失败锁定 10 分钟）+ 连续失败后 SVG 图形验证码。
+- **双通道身份认证**：学生经 CUHK ADFS 统一身份认证（OAuth2 授权码流，id_token 服务端验签，首次登录自动建档为 student）；管理员账号密码登录采用 RSA-2048 传输加密 + 防爆破锁定（默认 5 次失败锁定 10 分钟）+ 连续失败后 SVG 图形验证码。顾问不设登录入口，其排期与预约处理全部由管理后台代管。
 - **运营统计与导出**：预约总量 / 完成 / 取消 / 进行中统计与各顾问咨询量排名；预约明细与反馈汇总支持按顾问 / 月份过滤的 Excel 导出（base64 下载）；认证 / 变更 / 导出等敏感操作写入 JSON Lines 审计日志（按天轮转）。
 
 ## 3. 项目亮点 (Highlights)
 
-1. **行级锁防超订的并发预约内核** —— 预约与取消均先对 `pa_slot` 行执行 `with_for_update()` 加锁，再校验名额（`booked < quota`）、24 小时截止与重复预约，保证高并发场景下名额计数严格一致，杜绝超订。
+1. **行级锁防超订的并发预约内核** —— 预约与取消均先对 `pa_slot` 行执行 `with_for_update()` 加锁，再校验占用（`booked < 1`，每时段 1 人）、24 小时截止与重复预约，保证高并发场景下占用计数严格一致，杜绝超订。
 2. **advisory lock 防重的定时提醒调度** —— 每日 21:00 的提醒任务执行前先竞争 PostgreSQL 会话级咨询锁 `pg_try_advisory_lock(775200721)`，多 worker 部署下仅一个进程实际发送，业务逻辑经 `asyncio.to_thread` 跑在线程池中不阻塞事件循环，单轮异常不终止调度循环。
 3. **库表驱动的邮件模板体系** —— 三类邮件主题与正文 HTML 存于 `pa_mail_template`（支持 `{apply_no}` 等占位符），管理员可在线 upsert 文案；建表时幂等播种默认模板，渲染时缺失回退代码内置默认；SMTP 未配置时跳过发送但仍落库 `status="skipped"`，便于上线后补查。
 4. **纵深登录安全闭环** —— 登录凭据经 RSA-2048（OAEP-SHA256）端到端加密传输；口令以 PBKDF2 哈希落库且旧明文自动迁移；防爆破计数锁定 + 连续失败触发一次性 SVG 验证码；对不存在用户执行 DUMMY_HASH 校验抹平时序，防用户名枚举。
 5. **GraphQL 面收紧加固** —— 关闭 introspection（DisableIntrospection）、限制查询深度（QueryDepthLimiter, max_depth=8）、禁用 GraphiQL IDE、仅接受 POST 查询，显著缩小攻击面。
-6. **SSO 身份闭环与开发模拟** —— ADFS 授权码流换取 id_token 后服务端验签（含 nonce 防重放），只向前端签发独立会话 Token、不暴露 IdP 凭据；`PA_OAUTH_MOCK=1` 时接受 `mock.<用户名>` 授权码本地直通登录，无 ADFS 环境也能走通全链路联调。
-7. **可追溯的用户行为审计** —— 认证 / 排期变更 / 预约操作 / 导出等关键动作统一写入 `logs/id_x_007_audit.log`（JSON Lines，按天轮转，`PA_AUDIT_RETAIN_DAYS` 控制保留天数），满足事后追责与合规审查。
-8. **一键幂等的容器编排** —— `ops/up.sh` 以 Podman Pod 形式幂等拉起 db / service / web / haproxy 四容器（已存在即跳过），亦提供 `podman-compose.yml` 等价编排；数据库初始化脚本、默认管理员与邮件模板播种全部幂等，可重复执行。
+6. **SSO 身份闭环** —— ADFS 授权码流换取 id_token 后服务端验签（含 nonce 防重放），只向前端签发独立会话 Token、不暴露 IdP 凭据；凭据配置（client_id / client_secret / redirect_uri）存 `pa_sso_settings` 表，运行期改表即生效。
+7. **可追溯的用户行为审计** —— 认证 / 排期变更 / 预约操作 / 导出等关键动作统一写入 `logs/id_x_007_audit.log`（JSON Lines，按天轮转，保留 14 天自动清理），满足事后追责与合规审查。
+8. **一键幂等的容器编排** —— `ops/up.sh` 以 Podman Pod 形式幂等拉起 service / web / haproxy 三容器（已存在即跳过），亦提供 `podman-compose.yml` 等价编排；数据库直连外部 PostgreSQL（`ops/.env` 的 `DB_*`），建表与管理员 / 邮件模板 / SSO 配置播种全部幂等，可重复执行。
 
 ## 4. 技术栈 (Tech Stack)
 
@@ -62,7 +62,7 @@
 ```mermaid
 graph TD
     subgraph 客户端层
-        B[Browser 学生 / 顾问 / 管理员]
+        B[Browser 学生 / 管理员]
     end
 
     subgraph 网关层
@@ -70,7 +70,7 @@ graph TD
     end
 
     subgraph 前端层
-        W["Next.js Web :2000<br/>/f/007/user /f/007/advisor /f/007/admin"]
+        W["Next.js Web :2000<br/>/f/007/user /f/007/admin"]
     end
 
     subgraph 应用层["应用层（i-Core 宿主 :7000）"]
@@ -129,7 +129,7 @@ sequenceDiagram
     else 鉴权通过
         Note over V: 表单校验（主题 / 内容 / 方式 / 电话 / 微信）
         V->>PG: SELECT pa_slot WHERE id=? FOR UPDATE（行级锁）
-        alt 时段暂停 / 顾问停用或暂不接待 / 距开始 ≤ 24h / 名额已满 / 重复预约
+        alt 时段暂停 / 顾问停用或暂不接待 / 距开始 ≤ 24h / 时段已被预约 / 重复预约
             V-->>B: {code: 403, msg: "拒绝原因"}
         else 校验全部通过
             V->>PG: INSERT pa_appointment（单号 A+8 位数字）<br/>UPDATE pa_slot SET booked = booked + 1
@@ -169,7 +169,7 @@ id_x_007/
 │       ├── x_scheduler.py       # 定时调度：每日 21:00 次日预约提醒（advisory lock 防重）
 │       └── x_audit.py           # 用户行为审计日志（JSON Lines，按天轮转）
 ├── web/                         # 前端（Next.js App Router，端口 2000）
-│   ├── src/app/f/007/           # 页面路由：login / oauth2 / user / advisor / admin
+│   ├── src/app/f/007/           # 页面路由：login / user/oauth2(SSO 回调) / user / admin
 │   ├── src/views/               # 页面视图组件（预约 / 排期 / 统计 / 邮件日志等）
 │   ├── src/api/                 # GraphQL 客户端封装（user / advisor / admin）
 │   ├── src/components/          # 布局与通用 UI 组件
@@ -179,12 +179,12 @@ id_x_007/
 ├── ops/                         # 部署编排
 │   ├── up.sh                    # 一键启动（Podman Pod，幂等）
 │   ├── down.sh                  # 一键停止清理
-│   ├── podman-compose.yml       # compose 等价编排（db / service / web / haproxy）
+│   ├── podman-compose.yml       # compose 等价编排（service / web / haproxy，直连外部库）
 │   ├── Dockerfile.service       # 后端镜像（构建上下文为仓库根目录）
 │   ├── haproxy.cfg              # 网关：/b/id_x_007/ → 后端 :7000，其余 → 前端 :2000
 │   ├── .env.example             # 环境变量样例（复制为 .env 后修改）
-│   ├── init/                    # 数据库初始化 SQL（建库 / 预置管理员）
-│   └── engine_compat/           # 容器内 PostgreSQL 兼容覆盖（配置 / DB 工具 / 依赖清单）
+│   ├── init/                    # 数据库初始化 SQL（手动初始化外部库参考，应用启动会自动建表播种）
+│   └── engine_compat/           # 容器内 PostgreSQL 兼容覆盖（配置 / DB 工具 / 依赖清单；连接外部库）
 ├── scripts/
 │   └── reset_admin_password.py  # 运维脚本：重置管理员口令
 ├── docs/                        # 需求文档（docx）
@@ -197,9 +197,9 @@ id_x_007/
 
 - **端点**：`POST /b/id_x_007/graphql`（仅 POST；introspection 与 GraphiQL 已禁用）
 - **鉴权**：登录后将返回的会话 Token 置入请求头 `Token: <TOKEN>`；无需鉴权的操作仅 `health`、`loginKey`、`login`、`register`、`oauthLogin`。
-- **响应约定**：业务操作统一返回 `ApiResponse { code, msg, data }`（`data` 为 JSON 字符串）；文件下载返回 `FileResponse { code, msg, fileName, fileBase64 }`。常见业务码：200 成功、400 参数错误、401 未登录 / 凭据错误、403 禁止（名额满 / 截止 / 越权）、404 不存在、409 冲突、423 账号锁定、428 需要验证码、500 服务器错误。
+- **响应约定**：业务操作统一返回 `ApiResponse { code, msg, data }`（`data` 为 JSON 字符串）；文件下载返回 `FileResponse { code, msg, fileName, fileBase64 }`。常见业务码：200 成功、400 参数错误、401 未登录 / 凭据错误、403 禁止（时段已订 / 截止 / 越权）、404 不存在、409 冲突、423 账号锁定、428 需要验证码、500 服务器错误。
 
-### 8.1 Query 汇总（17 个）
+### 8.1 Query 汇总（15 个）
 
 <p align="center">表 8-1 GraphQL Query 汇总</p>
 
@@ -210,10 +210,8 @@ id_x_007/
 | advisorList | 登录 | 顾问卡片列表（含每人未来可约时段 ≤ 5 条与专业 / 方向筛选项） |
 | advisorSlotList | 登录 | 指定顾问的全部可约时段 |
 | myAppointmentList | 登录 | 我的预约列表（分页，附可取消标记） |
-| advisorMySlotList | advisor/admin | 顾问排期列表（含暂停时段；admin 传 advisorId 代管） |
-| advisorMyAppointmentList | advisor/admin | 顾问预约列表（可按状态筛选） |
-| advisorSlotTemplate | advisor/admin | 批量排期模板下载（xlsx：日期 / 开始时间 / 结束时间 / 名额） |
-| advisorMyExport | advisor/admin | 顾问个人历史预约导出（Excel，base64） |
+| advisorMySlotList | admin | 顾问排期列表（须传 advisorId 代管；含暂停时段） |
+| advisorSlotTemplate | admin | 批量排期模板下载（xlsx：日期 / 开始时间 / 结束时间） |
 | manageAdvisorList | admin | 顾问列表（keyword 匹配姓名 / 用户名 / 专业 / 方向） |
 | manageAppointmentList | admin | 全量预约明细（可按顾问 / 日期 / 状态筛选） |
 | manageFeedbackList | admin | 反馈列表（可按顾问 / 月份筛选） |
@@ -229,22 +227,22 @@ id_x_007/
 
 | 操作名 | 鉴权 | 说明 |
 |--------|------|------|
-| login | 无 | 账号密码登录（仅 admin/advisor；RSA 加密凭据 / 验证码 / 防爆破锁定） |
+| login | 无 | 账号密码登录（仅 admin；RSA 加密凭据 / 验证码 / 防爆破锁定） |
 | register | 无 | 管理员自助注册（注册后待运维登库激活） |
 | logout | 登录 | 登出（失效会话 Token） |
 | oauthLogin | 无 | CUHK SSO 登录（ADFS 授权码流；首次登录自动建档为 student） |
-| studentAppointmentCreate | 登录 | 学生预约（24h 截止 / 行锁名额校验 / 重复拦截 / 双方邮件通知） |
-| studentAppointmentCancel | 登录 | 学生取消预约（开始前 4 小时内禁止；双方邮件通知） |
-| advisorSlotCreate | advisor/admin | 新增咨询时段 |
-| advisorSlotUpdate | advisor/admin | 修改咨询时段（名额不得小于已订数） |
-| advisorSlotDelete | advisor/admin | 删除咨询时段（存在预约记录时拒绝） |
-| advisorSlotState | advisor/admin | 暂停 / 恢复咨询时段 |
-| advisorSlotBatchUpload | advisor/admin | 批量上传排期（xlsx，逐行校验返回成功 / 失败行报告） |
-| advisorAcceptingSet | advisor/admin | 设置「暂不接待」整体开关 |
-| advisorAppointmentCancel | advisor/admin | 顾问取消预约（须填原因；开始前 4 小时内禁止） |
-| advisorAppointmentComplete | advisor/admin | 标记咨询完成（开始时间已过方可） |
-| feedbackSet | advisor/admin | 填写 / 更新咨询反馈（仅 completed 预约，upsert） |
-| manageAdvisorCreate | admin | 创建顾问（建 SSO 登录账号 + 顾问档案） |
+| studentAppointmentCreate | 登录 | 学生预约（24h 截止 / 行锁占用校验 / 重复拦截 / 双方邮件通知） |
+| studentAppointmentCancel | 登录 | 学生取消预约（须填取消原因；开始前 4 小时内禁止；双方邮件通知） |
+| advisorSlotCreate | admin | 新增咨询时段（须传 advisorId 代管） |
+| advisorSlotUpdate | admin | 修改咨询时段（起止时间） |
+| advisorSlotDelete | admin | 删除咨询时段（存在预约记录时拒绝） |
+| advisorSlotState | admin | 暂停 / 恢复咨询时段 |
+| advisorSlotBatchUpload | admin | 批量上传排期（xlsx，逐行校验返回成功 / 失败行报告） |
+| advisorAcceptingSet | admin | 设置顾问「暂不接待」整体开关 |
+| advisorAppointmentCancel | admin | 代顾问取消预约（须填原因；开始前 4 小时内禁止） |
+| advisorAppointmentComplete | admin | 标记咨询完成（开始时间已过方可） |
+| feedbackSet | admin | 填写 / 更新咨询反馈（仅 completed 预约，upsert） |
+| manageAdvisorCreate | admin | 创建顾问（仅建顾问档案，不建用户账号） |
 | manageAdvisorUpdate | admin | 更新顾问档案（留空字段不变） |
 | manageAdvisorDelete | admin | 删除顾问（有预约记录时拒绝并提示停用） |
 | manageMailTemplateUpdate | admin | 邮件模板更新（按类型 upsert 主题与正文） |
@@ -307,7 +305,7 @@ mutation StudentAppointmentCreate {
 }
 ```
 
-成功返回 `{"appointmentId": 34, "applyNo": "A12345678"}`；异常码：401 未登录、400 表单校验失败、403 时段暂停 / 顾问暂不接待 / 距开始不足 24 小时 / 名额已满 / 重复预约、404 时段不存在。
+成功返回 `{"appointmentId": 34, "applyNo": "A12345678"}`；异常码：401 未登录、400 表单校验失败、403 时段暂停 / 顾问暂不接待 / 距开始不足 24 小时 / 时段已被预约 / 重复预约、404 时段不存在。
 
 #### 8.3.3 curl 调用示例
 
@@ -346,7 +344,7 @@ git clone <I_CORE_REPO_URL> && cd i-Core/x_models/id_x_007
 
 # 准备环境变量（首次执行 up.sh 也会自动生成 .env 模板）
 cp ops/.env.example ops/.env
-# 编辑 ops/.env：数据库口令、PA_OAUTH_*（CUHK SSO）、PA_SMTP_*（邮件）等
+# 编辑 ops/.env：外部数据库 DB_* 等；SSO/SMTP 配置存库（pa_sso_settings / pa_smtp_settings，启动自动播种）
 ```
 
 ### 9.3 运行 (Run)
@@ -354,7 +352,7 @@ cp ops/.env.example ops/.env
 容器一键启动（Podman Pod，幂等，推荐）：
 
 ```bash
-bash ops/up.sh            # 首次自动构建镜像并拉起 db / service / web / haproxy
+bash ops/up.sh            # 首次自动构建镜像并拉起 service / web / haproxy（数据库直连外部库）
 bash ops/up.sh --build    # 代码变更后强制重建镜像
 # 启动完成: http://localhost:8007 （前端），API 经 http://localhost:8007/b/id_x_007/graphql
 bash ops/down.sh          # 停止并清理全部容器与 Pod
@@ -377,20 +375,17 @@ cd web && cp .env.local.example .env.local && yarn install && yarn dev
 
 | 变量 | 说明 |
 |------|------|
-| POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD | 容器内 PostgreSQL 库名与账号口令 |
-| PA_ADMIN_USERNAME / PA_ADMIN_PASSWORD | 初始管理员兜底播种（留空默认 admin / admin123） |
-| PA_OAUTH_CLIENT_ID / PA_OAUTH_CLIENT_SECRET / PA_OAUTH_REDIRECT_URI | CUHK ADFS OAuth2 服务端配置 |
-| PA_OAUTH_MOCK | 置 1 启用开发模拟 SSO（生产严禁开启） |
-| PA_SMTP_HOST / PA_SMTP_PORT / PA_SMTP_USER / PA_SMTP_PASSWORD / PA_MAIL_FROM | SMTP 邮件配置（未配置则跳过发送仅落库） |
-| PA_SCHEDULER_DISABLED | 置 1 关闭每日 21:00 提醒调度（多实例时仅保留一个实例开启） |
-| PA_MAX_UPLOAD_BYTES / PA_AUDIT_RETAIN_DAYS | 批量上传大小上限（默认 10MB）/ 审计日志保留天数（默认 90） |
+| DB_HOST / DB_PORT / DB_NAME / DB_USERNAME / DB_PASSWORD | 外部 PostgreSQL 连接配置（部署不再内置 db 容器；本机库可填 host.containers.internal） |
+| ADMIN_USERNAME / ADMIN_PASSWORD | 初始管理员兜底播种（留空默认 admin / admin123） |
+
+SSO 凭据与 SMTP 邮件配置均已移入数据库（`pa_sso_settings` / `pa_smtp_settings` 表，应用启动自动播种，改表即生效，不走环境变量）；提醒调度默认开启；上传上限固定 32MB；审计日志固定保留 14 天。
 
 ### 9.4 容器部署 (podman-compose)
 
 ```bash
 cd ops
-podman-compose up -d --build   # 等价编排：db(55432) / service(7000) / web(2000) / haproxy(8007:8080)
+podman-compose up -d --build   # 等价编排：service(7000) / web(2000) / haproxy(8007:8080)，数据库直连外部库
 podman-compose down            # 停止
 ```
 
-端口约定：宿主机 `8007` 为统一入口（HAProxy 容器内 `8080`；`/b/id_x_007/` 前缀转后端 `7000`，其余转前端 `2000`）；宿主机 `55432` 直连容器内 PostgreSQL `5432` 便于运维登库（如激活自助注册的管理员、执行 `scripts/reset_admin_password.py`）。
+端口约定：宿主机 `8007` 为统一入口（HAProxy 容器内 `8080`；`/b/id_x_007/` 前缀转后端 `7000`，其余转前端 `2000`）。数据库为外部 PostgreSQL（`ops/.env` 的 `DB_*` 配置），运维登库（如激活自助注册的管理员、执行 `scripts/reset_admin_password.py`）直接连接外部库即可；表结构与预置数据（管理员 / 邮件模板 / SSO 配置）由应用启动时幂等创建，`ops/init/*.sql` 仅供手动初始化参考。

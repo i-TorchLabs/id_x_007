@@ -285,7 +285,8 @@ export default function AdvisorManagementView() {
       <Modal isOpen={modalOpen} onOpenChange={setModalOpen}>
         <Modal.Backdrop>
           <Modal.Container size="lg" placement="center">
-            <Modal.Dialog>
+            {/* HeroUI 预设最大 lg 仅 512px，表单字段多，放宽到 48rem 使输入框有足够展示宽度 */}
+            <Modal.Dialog className="max-w-3xl!">
               <Modal.CloseTrigger />
               <Modal.Header>
                 <Modal.Heading>{isEdit ? t("editTitle") : t("addTitle")}</Modal.Heading>

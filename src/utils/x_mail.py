@@ -1,13 +1,13 @@
 """邮件工具：SMTP 发送 + pa_email_log 落库。
 
-- SMTP 配置经环境变量注入：PA_SMTP_HOST / PA_SMTP_PORT / PA_SMTP_USER /
-  PA_SMTP_PASSWORD / PA_MAIL_FROM（缺省取 PA_SMTP_USER）；
-- 未配置 SMTP 时不实际发送，但仍落库 status="skipped"，便于上线后补查；
+- SMTP 配置存 pa_smtp_settings 表（取 id 最小行生效），发信时实时读取，
+  运行期改表即生效；mail_from 为空时回退 username；
+- 未配置 SMTP（host/username/password 任一为空）时不实际发送，
+  但仍落库 status="skipped"，便于上线后补查；
 - 发送失败不抛异常（status="failed" + error 落库），不影响业务主流程。
 """
 from __future__ import annotations
 
-import os
 import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -16,7 +16,9 @@ from typing import Any
 
 from utils.log_util import logger
 
-from x_models.id_x_007.src.models.x_models import PaEmailLog
+from sqlalchemy import select
+
+from x_models.id_x_007.src.models.x_models import PaEmailLog, PaSmtpSettings
 
 
 def _sanitize_header(value: Any) -> str:
@@ -24,15 +26,27 @@ def _sanitize_header(value: Any) -> str:
     return re.sub(r"[\r\n]+", " ", str(value or "")).strip()
 
 
-def _smtp_config() -> dict[str, str]:
-    """运行时读取 SMTP 配置（不在导入期固化，便于容器注入与测试）。"""
-    user = os.environ.get("PA_SMTP_USER", "")
+def _smtp_config(session) -> dict[str, str]:
+    """从 pa_smtp_settings 表读取 SMTP 配置（取 id 最小行，实时读表即改即生效）。
+
+    读取失败或无数据时返回空配置，send_mail 据此降级为 skipped。
+    """
+    try:
+        row = session.execute(
+            select(PaSmtpSettings).order_by(PaSmtpSettings.id).limit(1)
+        ).scalars().first()
+    except Exception as e:
+        logger.error(f"读取 SMTP 配置失败: table=pa_smtp_settings, {e}")
+        row = None
+    if row is None:
+        return {"host": "", "port": "587", "user": "", "password": "", "mail_from": ""}
+    user = (row.username or "").strip()
     return {
-        "host": os.environ.get("PA_SMTP_HOST", ""),
-        "port": os.environ.get("PA_SMTP_PORT", "587"),
+        "host": (row.host or "").strip(),
+        "port": str(row.port or 587),
         "user": user,
-        "password": os.environ.get("PA_SMTP_PASSWORD", ""),
-        "mail_from": os.environ.get("PA_MAIL_FROM", "") or user,
+        "password": row.password or "",
+        "mail_from": (row.mail_from or "").strip() or user,
     }
 
 
@@ -46,13 +60,13 @@ def send_mail(session, mail_to: str, mail_type: str, subject: str, content: str,
     """
     mail_to = _sanitize_header(mail_to)
     subject = _sanitize_header(subject)
-    cfg = _smtp_config()
+    cfg = _smtp_config(session)
 
     status, error = "sent", ""
     if not mail_to or "@" not in mail_to:
         status, error = "skipped", "收件人为空或非法"
     elif not (cfg["host"] and cfg["user"] and cfg["password"]):
-        status, error = "skipped", "SMTP 未配置（PA_SMTP_HOST/PA_SMTP_USER/PA_SMTP_PASSWORD）"
+        status, error = "skipped", "SMTP 未配置（pa_smtp_settings 表 host/username/password 为空）"
     else:
         server = None
         try:

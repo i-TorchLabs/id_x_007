@@ -1,6 +1,7 @@
--- id_x_007 业务库 DDL（首启执行，幂等）
--- 与 src/models/x_models.py 中 Pa* ORM 模型一一对应；
--- 引擎启动时 create_all 亦可建表，此处先行建好以承载 02_add_user.sql 预置数据。
+-- id_x_007 业务库 DDL（幂等）
+-- 与 src/models/x_models.py 中 Pa* ORM 模型一一对应。
+-- 部署已改为直连外部 PostgreSQL：应用启动时 create_all 自动建表，
+-- 本文件仅供手动初始化外部库 / 审阅表结构时参考，非必需执行。
 
 -- 用户表
 CREATE TABLE IF NOT EXISTS pa_user (
@@ -21,7 +22,7 @@ COMMENT ON COLUMN pa_user.id IS 'ID';
 COMMENT ON COLUMN pa_user.username IS '用户名（SSO 用户为 upn/邮箱）';
 COMMENT ON COLUMN pa_user.password IS '密码（PBKDF2 哈希，SSO 用户为 N/A）';
 COMMENT ON COLUMN pa_user."key" IS '会话密钥（Token）';
-COMMENT ON COLUMN pa_user.role IS '角色(student/advisor/admin)';
+COMMENT ON COLUMN pa_user.role IS '角色(student/admin)';
 COMMENT ON COLUMN pa_user.name IS '姓名';
 COMMENT ON COLUMN pa_user.email IS '邮箱';
 COMMENT ON COLUMN pa_user.state IS '状态(1启用/0停用)';
@@ -29,11 +30,12 @@ COMMENT ON COLUMN pa_user.is_active IS '是否已激活（自助注册的 admin 
 COMMENT ON COLUMN pa_user.create_time IS '创建时间';
 COMMENT ON COLUMN pa_user.update_time IS '更新时间';
 
--- 朋辈顾问档案表
+-- 档案表
 CREATE TABLE IF NOT EXISTS pa_advisor (
     id          SERIAL PRIMARY KEY,
-    user_id     INTEGER      NOT NULL UNIQUE REFERENCES pa_user (id),
+    username    VARCHAR(255) NOT NULL DEFAULT 'N/A' UNIQUE,
     name        VARCHAR(255) NOT NULL DEFAULT 'N/A',
+    email       VARCHAR(255) NOT NULL DEFAULT 'N/A',
     grade       VARCHAR(255) NOT NULL DEFAULT 'N/A',
     major       VARCHAR(255) NOT NULL DEFAULT 'N/A',
     direction   VARCHAR(255) NOT NULL DEFAULT 'N/A',
@@ -44,10 +46,11 @@ CREATE TABLE IF NOT EXISTS pa_advisor (
     create_time TIMESTAMP    NULL DEFAULT NOW(),
     update_time TIMESTAMP    NULL DEFAULT NOW()
 );
-COMMENT ON TABLE pa_advisor IS '朋辈顾问档案表';
+COMMENT ON TABLE pa_advisor IS '顾问档案表';
 COMMENT ON COLUMN pa_advisor.id IS 'ID';
-COMMENT ON COLUMN pa_advisor.user_id IS '用户ID';
+COMMENT ON COLUMN pa_advisor.username IS '账号标识（CUHK 邮箱/upn，仅用于标识，不提供登录）';
 COMMENT ON COLUMN pa_advisor.name IS '姓名';
+COMMENT ON COLUMN pa_advisor.email IS '邮箱';
 COMMENT ON COLUMN pa_advisor.grade IS '年级';
 COMMENT ON COLUMN pa_advisor.major IS '专业';
 COMMENT ON COLUMN pa_advisor.direction IS '擅长方向';
@@ -64,7 +67,6 @@ CREATE TABLE IF NOT EXISTS pa_slot (
     advisor_id  INTEGER      NOT NULL REFERENCES pa_advisor (id),
     start_time  TIMESTAMP    NOT NULL,
     end_time    TIMESTAMP    NOT NULL,
-    quota       INTEGER      NOT NULL DEFAULT 1,
     booked      INTEGER      NOT NULL DEFAULT 0,
     state       VARCHAR(255) NOT NULL DEFAULT '1',
     create_time TIMESTAMP    NULL DEFAULT NOW(),
@@ -75,7 +77,6 @@ COMMENT ON COLUMN pa_slot.id IS 'ID';
 COMMENT ON COLUMN pa_slot.advisor_id IS '顾问ID';
 COMMENT ON COLUMN pa_slot.start_time IS '开始时间';
 COMMENT ON COLUMN pa_slot.end_time IS '结束时间';
-COMMENT ON COLUMN pa_slot.quota IS '名额';
 COMMENT ON COLUMN pa_slot.booked IS '已订数';
 COMMENT ON COLUMN pa_slot.state IS '状态(1开放/0暂停)';
 COMMENT ON COLUMN pa_slot.create_time IS '创建时间';
@@ -181,3 +182,41 @@ COMMENT ON COLUMN pa_mail_template.html IS '正文 HTML 模板（支持 {apply_n
 COMMENT ON COLUMN pa_mail_template.create_time IS '创建时间';
 COMMENT ON COLUMN pa_mail_template.update_time IS '更新时间';
 -- 默认模板由应用启动时 seed_default_mail_templates 幂等播种（不覆盖已改记录）
+
+-- SSO 单点登录配置表（取 id 最小行生效；预置凭据见 03_sso.sql / 应用 seed_sso_settings）
+CREATE TABLE IF NOT EXISTS pa_sso_settings (
+    id            SERIAL PRIMARY KEY,
+    client_id     VARCHAR(128) NOT NULL,
+    client_secret VARCHAR(256) NOT NULL,
+    redirect_uri  VARCHAR(256) NOT NULL,
+    create_time   TIMESTAMP    NULL DEFAULT NOW(),
+    update_time   TIMESTAMP    NULL DEFAULT NOW()
+);
+COMMENT ON TABLE pa_sso_settings IS 'SSO 单点登录配置表';
+COMMENT ON COLUMN pa_sso_settings.id IS 'ID';
+COMMENT ON COLUMN pa_sso_settings.client_id IS 'ADFS 分配的 Client ID';
+COMMENT ON COLUMN pa_sso_settings.client_secret IS 'ADFS 共享秘钥（明文，仅服务端持有）';
+COMMENT ON COLUMN pa_sso_settings.redirect_uri IS 'OAuth2 回调地址（须与 ADFS 注册一致）';
+COMMENT ON COLUMN pa_sso_settings.create_time IS '创建时间';
+COMMENT ON COLUMN pa_sso_settings.update_time IS '更新时间';
+
+-- SMTP 邮件配置表（取 id 最小行生效；应用启动播种空白行，运维 UPDATE 填写即生效）
+CREATE TABLE IF NOT EXISTS pa_smtp_settings (
+    id          SERIAL PRIMARY KEY,
+    host        VARCHAR(255) NOT NULL DEFAULT '',
+    port        INTEGER      NOT NULL DEFAULT 587,
+    username    VARCHAR(255) NOT NULL DEFAULT '',
+    password    VARCHAR(255) NOT NULL DEFAULT '',
+    mail_from   VARCHAR(255) NOT NULL DEFAULT '',
+    create_time TIMESTAMP    NULL DEFAULT NOW(),
+    update_time TIMESTAMP    NULL DEFAULT NOW()
+);
+COMMENT ON TABLE pa_smtp_settings IS 'SMTP 邮件配置表';
+COMMENT ON COLUMN pa_smtp_settings.id IS 'ID';
+COMMENT ON COLUMN pa_smtp_settings.host IS 'SMTP 服务器地址';
+COMMENT ON COLUMN pa_smtp_settings.port IS 'SMTP 端口（默认 587 STARTTLS）';
+COMMENT ON COLUMN pa_smtp_settings.username IS 'SMTP 登录账号';
+COMMENT ON COLUMN pa_smtp_settings.password IS 'SMTP 登录口令（仅服务端持有）';
+COMMENT ON COLUMN pa_smtp_settings.mail_from IS '发件人地址（空则取 username）';
+COMMENT ON COLUMN pa_smtp_settings.create_time IS '创建时间';
+COMMENT ON COLUMN pa_smtp_settings.update_time IS '更新时间';

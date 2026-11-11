@@ -252,7 +252,7 @@ def verify_id_token(
         if expected_aud not in aud_values:
             logger.warning(
                 f"ADFS id_token aud 不匹配: {aud!r} != {expected_aud!r} "
-                "（检查 PA_OAUTH_CLIENT_ID 是否与 ADFS 应用组中的 client_id 一致）"
+                "（检查 pa_sso_settings.client_id 是否与 ADFS 应用组中的 client_id 一致）"
             )
             return None, "aud_mismatch"
 

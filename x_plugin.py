@@ -12,7 +12,7 @@ from x_models._contracts import PluginInterface
 
 
 class _Idx007Plugin:
-    """id_x_007 插件实现（UGO 朋辈顾问咨询预约系统），懒加载内部模块。
+    """id_x_007 插件实现（UGO 咨询预约系统），懒加载内部模块。
 
     适配宿主框架的异步契约（PluginInterface：async build_tables / async_sessionmaker）。
     模块内部（views/models）为同步 Session 风格，因此本适配层做两处桥接：
@@ -20,9 +20,9 @@ class _Idx007Plugin:
     - set_session_maker：从宿主异步引擎（asyncpg）的 URL 派生 psycopg2 同步引擎，
       构造同步 sessionmaker 注入模块（容器部署则由 ops/engine_compat 全局走同步，
       不经过此桥接）；注入成功后启动每日 21:00 的预约提醒调度器
-      （无运行中事件循环 / PA_SCHEDULER_DISABLED=1 时自动跳过）。
+      （无运行中事件循环时自动跳过）。
     业务侧另含用户行为审计日志（utils/x_audit.py）：认证/变更/导出操作写入
-    logs/id_x_007_audit.log（JSON Lines，按天轮转，PA_AUDIT_RETAIN_DAYS 控制保留）。
+    logs/id_x_007_audit.log（JSON Lines，按天轮转，保留 14 天）。
     """
 
     name = "id_x_007"
@@ -65,13 +65,18 @@ class _Idx007Plugin:
 
     async def build_tables(self, conn: AsyncConnection) -> None:
         await conn.run_sync(self.base.metadata.create_all)
-        # 建表后播种初始管理员与默认邮件模板（均幂等）
+        # 建表后播种初始管理员、默认邮件模板、SSO 与 SMTP 配置（均幂等；
+        # 外部数据库不执行 ops/init/*.sql，预置数据全靠此处兜底）
         from x_models.id_x_007.src.models.x_models import (
             seed_default_mail_templates,
             seed_initial_admin,
+            seed_smtp_settings,
+            seed_sso_settings,
         )
         await conn.run_sync(seed_initial_admin)
         await conn.run_sync(seed_default_mail_templates)
+        await conn.run_sync(seed_sso_settings)
+        await conn.run_sync(seed_smtp_settings)
 
 
 def load_plugin() -> PluginInterface:

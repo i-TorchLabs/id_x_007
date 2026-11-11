@@ -9,12 +9,12 @@ export default {
     cancelled: "Cancelled",
     booked: "In Progress (Booked)",
   },
-  // Advisor ranking table
-  rankingTableAria: "Advisor ranking",
+  // Consultant ranking table
+  rankingTableAria: "Consultant ranking",
   dataTableAria: "Data table",
   columns: {
     rank: "Rank",
-    advisor: "Advisor",
+    advisor: "Consultant",
     appointments: "Appointments",
     completed: "Completed",
   },

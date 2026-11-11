@@ -1,6 +1,6 @@
 """契约层：Strawberry GraphQL Input/Type 纯类型定义，不含任何业务逻辑。
 
-UGO 朋辈顾问咨询预约系统（id_x_007）：字段经 strawberry 自动转为 camelCase
+UGO 咨询预约系统（id_x_007）：字段经 strawberry 自动转为 camelCase
 （如 page_size → pageSize、advisor_id → advisorId），与前端契约一致。
 """
 from __future__ import annotations
@@ -67,11 +67,15 @@ class LogoutInput:
 class OauthInput:
     """CUHK SSO 登录入参：ADFS 授权码授予流（student / advisor）。
 
-    - 优先使用 code（授权码，服务端用 client_secret 换 id_token，最安全）；
-    - oauth_token 仅为旧隐式流兼容保留，新流程不应使用。
+    - code：ADFS 授权码（response_type=code 回调获得），服务端用 client_secret
+      换 id_token，最安全；
+    - state：CSRF 防护随机串，由前端生成、回调页校验后原样回传（仅用于日志追溯）；
+    - oauth_token：旧隐式流遗留字段，仅为兼容旧版前端保留，服务端已不再接受
+      （隐式流 token 未经服务端验签，存在伪造登录风险）。
     """
     code: str = strawberry.field(default="", description="ADFS 授权码（response_type=code 回调获得）")
-    oauth_token: str = strawberry.field(default="", description="[已废弃] 旧隐式流 access_token")
+    state: str = strawberry.field(default="", description="CSRF 防护随机串（与授权请求一致）")
+    oauth_token: str = strawberry.field(default="", description="[已废弃] 旧隐式流 access_token，服务端忽略")
 
 
 # ===== 通用分页 =====
@@ -109,30 +113,22 @@ class AppointmentCreateInput:
 @strawberry.input
 class AppointmentIdInput:
     appointment_id: int = strawberry.field(description="预约ID")
+    reason: str = strawberry.field(default="", description="取消原因（取消预约时必填）")
 
 
-# ===== 顾问端 · 排期与预约管理 =====
+# ===== 排期与预约管理（管理端代管） =====
 @strawberry.input
 class AdvisorPageInput:
     page: int = strawberry.field(default=1, description="页码")
     page_size: int = strawberry.field(default=10, description="每页数量")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填，advisor 忽略取本人）")
-
-
-@strawberry.input
-class AdvisorAppointmentListInput:
-    page: int = strawberry.field(default=1, description="页码")
-    page_size: int = strawberry.field(default=10, description="每页数量")
-    state: str = strawberry.field(default="", description="状态筛选（booked/cancelled_student/cancelled_advisor/completed）")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填，advisor 忽略取本人）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
 class SlotCreateInput:
     start_time: str = strawberry.field(description="开始时间（毫秒时间戳或 YYYY-MM-DD HH:MM）")
     end_time: str = strawberry.field(description="结束时间（毫秒时间戳或 YYYY-MM-DD HH:MM）")
-    quota: int = strawberry.field(default=1, description="名额（默认 1 人）")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
@@ -140,47 +136,46 @@ class SlotUpdateInput:
     slot_id: int = strawberry.field(description="时段ID")
     start_time: str = strawberry.field(description="开始时间（毫秒时间戳或 YYYY-MM-DD HH:MM）")
     end_time: str = strawberry.field(description="结束时间（毫秒时间戳或 YYYY-MM-DD HH:MM）")
-    quota: int = strawberry.field(default=1, description="名额（不得小于已订数）")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
 class SlotIdInput:
     slot_id: int = strawberry.field(description="时段ID")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
 class SlotStateInput:
     slot_id: int = strawberry.field(description="时段ID")
     state: str = strawberry.field(description="状态（1开放/0暂停）")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
 class SlotBatchUploadInput:
     file_name: str = strawberry.field(description="文件名（.xlsx）")
     file_base64: str = strawberry.field(description="文件内容（base64）")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
 class AcceptingSetInput:
     accepting: str = strawberry.field(description="接待状态（1接待/0暂不接待）")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
 class AdvisorCancelInput:
     appointment_id: int = strawberry.field(description="预约ID")
     reason: str = strawberry.field(description="取消原因（必填）")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
 class AdvisorCompleteInput:
     appointment_id: int = strawberry.field(description="预约ID")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 @strawberry.input
@@ -189,12 +184,7 @@ class FeedbackSetInput:
     summary: str = strawberry.field(description="咨询总结")
     handle: str = strawberry.field(description="处理方式")
     need_followup: str = strawberry.field(default="0", description="是否需要跟进（1是/0否）")
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填）")
-
-
-@strawberry.input
-class AdvisorExportInput:
-    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管时必填，advisor 忽略取本人）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（管理端代管必填）")
 
 
 # ===== 管理后台 =====

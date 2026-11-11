@@ -19,7 +19,6 @@ const toAdvisorId = (v?: string | number): number => Number(v) || 0;
 /** status/accepting 为 "1"/"0" */
 export interface ManageAdvisor {
   advisorId: string;
-  userId: string;
   username: string;
   name: string;
   email: string;
@@ -117,10 +116,12 @@ export const manageAdvisorDeleteApi = async (advisorId: string) => {
 
 export interface ManageAppointment {
   appointmentId: string;
+  advisorId: string;
   applyNo: string;
   advisorName: string;
   studentName: string;
   studentNo: string;
+  studentEmail: string;
   startTime: string;
   endTime: string;
   topic: string;
@@ -131,6 +132,12 @@ export interface ManageAppointment {
   meetingLink: string;
   state: string;
   cancelReason: string;
+  cancelable: boolean;
+  completable: boolean;
+  hasFeedback: boolean;
+  feedbackSummary: string;
+  feedbackHandle: string;
+  feedbackNeedFollowup: string;
   createTime: string;
 }
 

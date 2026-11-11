@@ -1,6 +1,6 @@
 """业务层：全部业务逻辑，view_* 命名；异常在视图内捕获并转换为业务响应。
 
-UGO 朋辈顾问咨询预约系统（pa 业务域），复刻插件化 GraphQL 架构：
+UGO 咨询预约系统（pa 业务域），复刻插件化 GraphQL 架构：
 - 保持 code/msg/data 统一响应结构；
 - 宿主 DB 契约为同步 SQLAlchemy（sessionmaker[Session]），全部视图为同步 def；
 - Token 从 GraphQL 请求头 Header "Token" 读取；
@@ -39,15 +39,14 @@ from x_models.id_x_007.src.models.x_models import (
     PaFeedback,
     PaMailTemplate,
     PaSlot,
+    PaSsoSettings,
     PaUser,
     get_session,
 )
 from x_models.id_x_007.src.schemas.x_schemas import (
     AcceptingSetInput,
-    AdvisorAppointmentListInput,
     AdvisorCancelInput,
     AdvisorCompleteInput,
-    AdvisorExportInput,
     AdvisorIdInput,
     AdvisorListInput,
     AdvisorPageInput,
@@ -104,8 +103,8 @@ def _env_int(name: str, default: int) -> int:
 
 # 分页参数边界：防 pageSize 过大拖垮内存、page 非法导致 500
 MAX_PAGE_LIMIT = 100
-# 上传文件大小上限（base64 解码后估算），默认 10MB
-MAX_UPLOAD_BYTES = _env_int("PA_MAX_UPLOAD_BYTES", 10 * 1024 * 1024)
+# 上传文件大小上限（base64 解码后估算），固定 32MB
+MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 # 时间规则：预约须在开始前 24 小时之前；取消（学生/顾问）在开始前 4 小时内禁止
 BOOK_DEADLINE_HOURS = 24
 CANCEL_DEADLINE_HOURS = 4
@@ -121,18 +120,50 @@ STATE_LABELS = {
     "completed": "已完成",
 }
 
-# ===== OAuth2 配置（敏感信息经环境变量注入） =====
-OAUTH_CLIENT_ID = os.environ.get("PA_OAUTH_CLIENT_ID", "")
-OAUTH_CLIENT_SECRET = os.environ.get("PA_OAUTH_CLIENT_SECRET", "")
-OAUTH_REDIRECT_URI = os.environ.get("PA_OAUTH_REDIRECT_URI", "")
-# 开发模拟 SSO：PA_OAUTH_MOCK=1 时接受 "mock.<用户名>" 形式授权码，跳过 ADFS
-# 换 token / 验签，直接以模拟身份登录。仅限本地联调使用，生产环境严禁开启。
-OAUTH_MOCK = os.environ.get("PA_OAUTH_MOCK", "") == "1"
+# ===== OAuth2 配置（来自 pa_sso_settings 表，参考 id_x_010 实现） =====
+# client_secret 仅服务端持有，存库后由本层读入缓存，绝不进入前端代码。
+def load_oauth_config() -> dict | None:
+    """从 pa_sso_settings 表读取首行 SSO 配置并注入全局缓存。
+
+    取 id 最小行作为生效配置（与 id_x_010 的 sso_settings 语义一致）。
+    表无数据或读取失败时返回 None，缓存保持原状，view_oauth_login 拒绝 SSO 登录。
+    """
+    from x_models.id_x_007.src.models.x_models import get_session, set_oauth_config
+
+    try:
+        with get_session()() as session:
+            row = session.execute(
+                select(PaSsoSettings).order_by(PaSsoSettings.id).limit(1)
+            ).scalars().first()
+    except Exception as e:
+        logger.error(f"{_rid()}读取 SSO 配置失败: table=pa_sso_settings, {e}", exc_info=True)
+        return None
+
+    if row is None:
+        logger.warning(f"{_rid()}pa_sso_settings 表无数据，SSO 登录不可用")
+        return None
+
+    config = {
+        "client_id": row.client_id,
+        "client_secret": row.client_secret,
+        "redirect_uri": row.redirect_uri,
+    }
+    set_oauth_config(config)
+    logger.info(f"{_rid()}SSO 配置已加载: 来源=pa_sso_settings 表, client_id={row.client_id}")
+    return config
+
+
+def _oauth_config() -> dict | None:
+    """读取 SSO 配置：优先进程缓存，未命中时回库加载（支持运行期改库即生效）。"""
+    from x_models.id_x_007.src.models.x_models import get_oauth_config
+
+    return get_oauth_config() or load_oauth_config()
 
 
 def _oauth_config_missing() -> bool:
     """SSO 服务端配置是否缺失。"""
-    return not (OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET and OAUTH_REDIRECT_URI)
+    cfg = _oauth_config()
+    return not (cfg and cfg.get("client_id") and cfg.get("client_secret") and cfg.get("redirect_uri"))
 
 
 # ===== 通用工具 =====
@@ -172,12 +203,6 @@ def _get_user_by_token(info: Info) -> PaUser | None:
 def _verify_token(info: Info) -> PaUser | None:
     """登录态鉴权：任意已登录用户，返回用户对象（失败返回 None）。"""
     return _get_user_by_token(info)
-
-
-def _verify_advisor(info: Info) -> PaUser | None:
-    """顾问端鉴权：Token 有效且角色为 advisor/admin。"""
-    user = _get_user_by_token(info)
-    return user if (user and user.role in ("advisor", "admin")) else None
 
 
 def _verify_admin(info: Info) -> PaUser | None:
@@ -291,26 +316,16 @@ def _student_no_of(user: PaUser) -> str:
     return "N/A"
 
 
-def _resolve_advisor(session, user: PaUser, advisor_id: Any) -> tuple[PaAdvisor | None, str]:
-    """定位操作目标顾问：advisor 角色固定取本人档案（忽略入参），admin 须显式指定。
+def _resolve_advisor(session, advisor_id: Any) -> tuple[PaAdvisor | None, str]:
+    """定位操作目标顾问：顾问功能全部由管理员代管，须显式指定 advisorId。
 
     返回 (顾问对象, 错误消息)；成功时错误消息为空串。
     """
-    if user.role == "advisor":
-        advisor = _first(session, select(PaAdvisor).where(PaAdvisor.user_id == user.id))
-        return (advisor, "") if advisor else (None, "顾问档案不存在，请联系管理员")
     aid = _to_int(advisor_id)
     if not aid:
         return None, "请指定顾问（advisorId）"
     advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == aid))
     return (advisor, "") if advisor else (None, "顾问不存在")
-
-
-def _advisor_user(session, advisor: PaAdvisor | None) -> PaUser | None:
-    """顾问档案对应的登录账号（取邮箱用）。"""
-    if not advisor:
-        return None
-    return _first(session, select(PaUser).where(PaUser.id == advisor.user_id))
 
 
 def _cancelable(state: str, start_time: datetime | None, now: datetime) -> bool:
@@ -350,7 +365,7 @@ def mail_context(appt: PaAppointment, slot: PaSlot, advisor_name: str,
 def _notify_both(session, *, mail_type: str, appt: PaAppointment, slot: PaSlot,
                  advisor_name: str, intro: str, extra: str = "",
                  student_user: PaUser | None = None,
-                 advisor_user: PaUser | None = None) -> None:
+                 advisor_email: str = "") -> None:
     """给学生与顾问各发一封通知邮件（均落 pa_email_log，失败不影响主流程）。
 
     主题与正文经 pa_mail_template 渲染（管理员可配置），模板缺失回退内置默认。
@@ -360,8 +375,8 @@ def _notify_both(session, *, mail_type: str, appt: PaAppointment, slot: PaSlot,
     )
     if student_user:
         send_mail(session, student_user.email, mail_type, subject, content, appt.id)
-    if advisor_user:
-        send_mail(session, advisor_user.email, mail_type, subject, content, appt.id)
+    if advisor_email and advisor_email != "N/A":
+        send_mail(session, advisor_email, mail_type, subject, content, appt.id)
 
 
 def _style_header_row(ws, col_count: int) -> None:
@@ -554,7 +569,7 @@ def _decrypt_login_credentials(data: LoginInput) -> tuple[str, str] | None:
 
 
 def view_login(info: Info, data: LoginInput) -> ApiResponse:
-    """账号密码登录（仅 admin/advisor；student 一律走 CUHK SSO）。"""
+    """账号密码登录（仅 admin；student 一律走 CUHK SSO，顾问不设登录入口）。"""
     maker = get_session()
     with maker() as session:
         try:
@@ -597,7 +612,7 @@ def view_login(info: Info, data: LoginInput) -> ApiResponse:
                 audit("auth.login_fail", obj, info=info, result="fail", detail="账号待激活")
                 return _resp(403, "账号待激活，请联系运维人员激活后登录")
             if obj.password == "N/A":
-                # SSO 预建账号（advisor）未设置本地密码：禁止密码登录，防 "N/A" 明文兼容被利用
+                # SSO 账号（student）无本地口令：禁止密码登录，防 "N/A" 明文兼容被利用
                 check_password(DUMMY_HASH, password)
                 _record_login_failure(username)
                 return _login_fail_response(username, info)
@@ -688,11 +703,6 @@ def view_logout(info: Info, data: LogoutInput) -> ApiResponse:
             if obj:
                 obj.key = "N/A"
                 session.commit()
-            return _resp(200, "Logout Success")
-            obj = _first(session, select(PaUser).where(PaUser.id == data.user_id))
-            if obj:
-                obj.key = "N/A"
-                session.commit()
             audit("auth.logout", user, info=info, target=f"user#{data.user_id}")
             return _resp(200, "Logout Success")
         except Exception as e:
@@ -712,33 +722,20 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
        若账号已被管理员预建为 advisor，则以 advisor 身份登录；
     5. 返回服务端签发的独立会话 token，不再暴露 IdP token。
     """
-    logger.info(f"{_rid()}OAuth 登录请求: has_code={bool(data.code)} has_token={bool(data.oauth_token)}")
+    logger.info(f"{_rid()}OAuth 登录请求: has_code={bool(data.code)} state_len={len(data.state or '')}")
     payload_data: dict | None = None
-    if OAUTH_MOCK and data.code.startswith("mock."):
-        # 开发模拟 SSO：无需 ADFS，按 "mock.<用户名>" 直接构造身份声明（生产严禁开启）
-        mock_user = re.sub(r"[^\w.-]", "", data.code[len("mock."):]) or "dev_student"
-        mock_upn = f"{mock_user}@link.cuhk.edu.cn"
-        logger.warning(f"{_rid()}开发模拟 SSO 登录（PA_OAUTH_MOCK=1）: {mock_upn}")
-        payload_data = {
-            "_identity": {
-                "upn": mock_upn,
-                "email": mock_upn,
-                "display_name": mock_user,
-                "upn_claim": "mock",
-                "email_claim": "mock",
-            }
-        }
-    elif _oauth_config_missing():
-        logger.error(f"{_rid()}OAuth2 服务端配置缺失（PA_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI）")
+    if _oauth_config_missing():
+        logger.error(f"{_rid()}OAuth2 服务端配置缺失（pa_sso_settings 表无数据）")
         return _resp(500, "SSO 服务未配置")
     elif data.code:
+        oauth_cfg = _oauth_config() or {}
         # 防重放 nonce：与本次授权码绑定，ADFS 回显后由 exchange_code_for_token 校验
         nonce = hashlib.sha256(data.code.encode("utf-8")).hexdigest()
         token_resp = x_oauth.exchange_code_for_token(
             code=data.code,
-            client_id=OAUTH_CLIENT_ID,
-            client_secret=OAUTH_CLIENT_SECRET,
-            redirect_uri=OAUTH_REDIRECT_URI,
+            client_id=oauth_cfg["client_id"],
+            client_secret=oauth_cfg["client_secret"],
+            redirect_uri=oauth_cfg["redirect_uri"],
             expected_nonce=nonce,
         )
         if token_resp is None:
@@ -749,7 +746,9 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
             logger.warning(f"{_rid()}OAuth /token 响应缺少 id_token: keys={list(token_resp.keys())}")
             return _resp(401, "Invalid OAuth Token Response")
         logger.info(f"{_rid()}OAuth 换取 id_token 成功，开始验签")
-        payload_data, reason = x_oauth.verify_id_token(id_token, expected_aud=OAUTH_CLIENT_ID)
+        payload_data, reason = x_oauth.verify_id_token(
+            id_token, expected_aud=oauth_cfg["client_id"]
+        )
         if payload_data is None:
             # 失败诊断直接进 warn.log：payload keys 是定位 ADFS 配置问题的关键证据
             _payload = x_oauth.decode_payload_unverified(id_token) or {}
@@ -770,22 +769,10 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                     f"{_rid()}OAuth 身份解析成功: upn_claim={identity['upn_claim']} "
                     f"email_claim={identity['email_claim']}"
                 )
-    elif data.oauth_token:
-        # 旧隐式流兼容：仅结构+有效期校验，逐步淘汰
-        payload_data = x_oauth.decode_payload_unverified(data.oauth_token)
-        if payload_data is not None:
-            exp = payload_data.get("exp")
-            if exp is not None and datetime.now().timestamp() >= float(exp):
-                payload_data = None
-            else:
-                identity = x_oauth.resolve_identity_claims(payload_data)
-                if identity is None:
-                    payload_data = None
-                else:
-                    payload_data["_identity"] = identity
 
     if payload_data is None:
-        return _resp(401, "Invalid OAuth Token")
+        # 无授权码 / 换票失败 / 验签失败统一拒绝（旧隐式流 oauth_token 已废弃，不再接受）
+        return _resp(401, "Invalid OAuth Code")
 
     maker = get_session()
     with maker() as session:
@@ -820,8 +807,7 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                 session.refresh(obj)
                 logger.warning(f"{_rid()}SSO 新用户建档 {upn} {name} {email}")
             else:
-                # 老用户（含被管理员预建的 advisor）：统一签发新会话密钥；
-                # 预建档缺失的姓名/邮箱用 SSO 声明补全
+                # 老用户：统一签发新会话密钥；建档缺失的姓名/邮箱用 SSO 声明补全
                 obj.key = session_key
                 if obj.name in ("", "N/A") and name != "N/A":
                     obj.name = name
@@ -829,12 +815,14 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                     obj.email = email
                 obj.update_time = datetime.now()
                 session.commit()
-            logger.info(f"{_rid()}SSO 登录成功 {upn}（{obj.role}）")
+            # 顾问不设登录入口：会话角色仅取本地账号角色（student/admin）
+            role = obj.role
+            logger.info(f"{_rid()}SSO 登录成功 {upn}（{role}）")
             audit("auth.sso_login", obj, info=info, detail="CUHK SSO 登录成功")
             return _resp(200, "Login Success", {
                 "user_id": str(obj.id),
                 "token": session_key,
-                "role": obj.role,
+                "role": role,
                 "name": obj.name,
                 "username": obj.username,
             })
@@ -848,7 +836,7 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
 # 学生端 · 顾问浏览与预约
 # ---------------------------
 def _bookable_slots_of(session, advisor: PaAdvisor, now: datetime, limit: int | None = None) -> list[dict]:
-    """顾问当前可约时段：开放中、未满额、距开始 > 24 小时；顾问「暂不接待」时为空。"""
+    """顾问当前可约时段：开放中、未被预约、距开始 > 24 小时；顾问「暂不接待」时为空。"""
     if advisor.accepting != "1" or advisor.status != "1":
         return []
     deadline = now + timedelta(hours=BOOK_DEADLINE_HOURS)
@@ -857,7 +845,7 @@ def _bookable_slots_of(session, advisor: PaAdvisor, now: datetime, limit: int | 
         .where(
             PaSlot.advisor_id == advisor.id,
             PaSlot.state == "1",
-            PaSlot.booked < PaSlot.quota,
+            PaSlot.booked < 1,
             PaSlot.start_time > deadline,
         )
         .order_by(PaSlot.start_time)
@@ -869,7 +857,6 @@ def _bookable_slots_of(session, advisor: PaAdvisor, now: datetime, limit: int | 
         "slotId": s.id,
         "startTime": _fmt_dt(s.start_time),
         "endTime": _fmt_dt(s.end_time),
-        "quota": s.quota,
         "booked": s.booked,
     } for s in slots]
 
@@ -991,7 +978,7 @@ def view_my_appointment_list(info: Info, data: PageInput) -> ApiResponse:
 
 
 def view_student_appointment_create(info: Info, data: AppointmentCreateInput) -> ApiResponse:
-    """学生预约：表单校验 + 24h 截止 + 行锁名额/重复校验 + 双方邮件通知。"""
+    """学生预约：表单校验 + 24h 截止 + 行锁占用/重复校验 + 双方邮件通知。"""
     user = _verify_token(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1017,7 +1004,7 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
     maker = get_session()
     with maker() as session:
         try:
-            # 并发安全：对 slot 行加锁后再校验名额与重复预约
+            # 并发安全：对 slot 行加锁后再校验占用与重复预约
             slot = session.execute(
                 select(PaSlot).where(PaSlot.id == data.slot_id).with_for_update()
             ).scalars().first()
@@ -1033,8 +1020,8 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
             now = datetime.now()
             if now >= slot.start_time - timedelta(hours=BOOK_DEADLINE_HOURS):
                 return _resp(403, f"需在咨询开始前 {BOOK_DEADLINE_HOURS} 小时之前预约")
-            if slot.booked >= slot.quota:
-                return _resp(403, "该时段名额已满")
+            if slot.booked >= 1:
+                return _resp(403, "该时段已被预约")
             dup = _first(session, select(PaAppointment.id).where(
                 PaAppointment.slot_id == slot.id,
                 PaAppointment.student_user_id == user.id,
@@ -1066,7 +1053,6 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
             audit("appointment.create", user, info=info, target=apply_no,
                   detail=f"顾问={advisor.name} 时段#{slot.id} 方式={mode}")
             # 预约成功邮件（双方；失败仅落日志不影响预约结果）
-            advisor_user = _advisor_user(session, advisor)
             student_user = _first(session, select(PaUser).where(PaUser.id == user.id))
             _notify_both(
                 session,
@@ -1076,7 +1062,7 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
                 advisor_name=advisor.name,
                 intro="您的朋辈咨询预约已成功：",
                 student_user=student_user,
-                advisor_user=advisor_user,
+                advisor_email=advisor.email,
             )
             session.commit()
             return _resp(200, "预约成功", {"appointmentId": appt.id, "applyNo": apply_no})
@@ -1087,10 +1073,13 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
 
 
 def view_student_appointment_cancel(info: Info, data: AppointmentIdInput) -> ApiResponse:
-    """学生取消自己的预约（开始前 4 小时内禁止），双方邮件通知。"""
+    """学生取消自己的预约（须填取消原因；开始前 4 小时内禁止），双方邮件通知。"""
     user = _verify_token(info)
     if not user:
         return _resp(401, "Token Error")
+    reason = (data.reason or "").strip()
+    if not reason:
+        return _resp(400, "取消原因不能为空")
     maker = get_session()
     with maker() as session:
         try:
@@ -1113,12 +1102,14 @@ def view_student_appointment_cancel(info: Info, data: AppointmentIdInput) -> Api
             if now >= slot.start_time - timedelta(hours=CANCEL_DEADLINE_HOURS):
                 return _resp(403, f"咨询开始前 {CANCEL_DEADLINE_HOURS} 小时内不可取消")
             appt.state = "cancelled_student"
+            appt.cancel_reason = reason
             appt.update_time = now
             slot.booked = max(slot.booked - 1, 0)
             slot.update_time = now
             session.commit()
-            logger.info(f"{_rid()}学生取消预约 {appt.apply_no}")
-            audit("appointment.cancel", user, info=info, target=appt.apply_no, detail="学生取消")
+            logger.info(f"{_rid()}学生取消预约 {appt.apply_no}：{reason}")
+            audit("appointment.cancel", user, info=info, target=appt.apply_no,
+                  detail=f"学生取消，原因={reason}")
             advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == appt.advisor_id))
             _notify_both(
                 session,
@@ -1127,8 +1118,9 @@ def view_student_appointment_cancel(info: Info, data: AppointmentIdInput) -> Api
                 slot=slot,
                 advisor_name=advisor.name if advisor else "N/A",
                 intro="以下朋辈咨询预约已由学生取消：",
+                extra=f"取消原因：{reason}",
                 student_user=_first(session, select(PaUser).where(PaUser.id == user.id)),
-                advisor_user=_advisor_user(session, advisor),
+                advisor_email=advisor.email if advisor else "",
             )
             session.commit()
             return _resp(200, "取消成功")
@@ -1139,17 +1131,17 @@ def view_student_appointment_cancel(info: Info, data: AppointmentIdInput) -> Api
 
 
 # ---------------------------
-# 顾问端 · 排期管理
+# 排期管理（管理端代管）
 # ---------------------------
 def view_advisor_my_slot_list(info: Info, data: AdvisorPageInput) -> ApiResponse:
-    """顾问排期列表（含暂停时段；admin 需传 advisorId 代管）。"""
-    user = _verify_advisor(info)
+    """排期列表（管理端代管，须指定 advisorId）。"""
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             page, page_size = _clamp_page(data.page, data.page_size)
@@ -1166,7 +1158,6 @@ def view_advisor_my_slot_list(info: Info, data: AdvisorPageInput) -> ApiResponse
                 # 编辑回填用毫秒时间戳
                 "startTimeMs": _dt_ms(obj.start_time),
                 "endTimeMs": _dt_ms(obj.end_time),
-                "quota": obj.quota,
                 "booked": obj.booked,
                 "state": obj.state,
             } for obj in objs]
@@ -1183,14 +1174,14 @@ def view_advisor_my_slot_list(info: Info, data: AdvisorPageInput) -> ApiResponse
 
 
 def view_advisor_slot_create(info: Info, data: SlotCreateInput) -> ApiResponse:
-    """新增咨询时段（advisor 本人 / admin 代管）。"""
-    user = _verify_advisor(info)
+    """新增咨询时段（admin 代管，须指定 advisorId）。"""
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             start_dt = _parse_dt(data.start_time)
@@ -1201,14 +1192,10 @@ def view_advisor_slot_create(info: Info, data: SlotCreateInput) -> ApiResponse:
                 return _resp(400, "开始时间需早于结束时间")
             if start_dt <= datetime.now():
                 return _resp(400, "只能创建未来的时段")
-            quota = _to_int(data.quota)
-            if quota is None or quota < 1:
-                return _resp(400, "名额需为正整数")
             obj = PaSlot(
                 advisor_id=advisor.id,
                 start_time=start_dt,
                 end_time=end_dt,
-                quota=quota,
                 booked=0,
                 state="1",
             )
@@ -1216,7 +1203,7 @@ def view_advisor_slot_create(info: Info, data: SlotCreateInput) -> ApiResponse:
             session.commit()
             logger.info(f"{_rid()}顾问 {advisor.name} 新增时段 {_fmt_dt(start_dt)}~{_fmt_dt(end_dt)}")
             audit("slot.create", user, info=info, target=f"slot#{obj.id}",
-                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)} 名额={quota} 顾问={advisor.name}")
+                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)} 顾问={advisor.name}")
             return _resp(200, "success", {"slotId": obj.id})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1235,14 +1222,14 @@ def _owned_slot(session, advisor: PaAdvisor, slot_id: Any) -> PaSlot | None:
 
 
 def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
-    """修改咨询时段（名额不得小于已订数）。"""
-    user = _verify_advisor(info)
+    """修改咨询时段（起止时间）。"""
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             obj = _owned_slot(session, advisor, data.slot_id)
@@ -1254,18 +1241,12 @@ def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
                 return _resp(400, "时间格式不合法")
             if start_dt >= end_dt:
                 return _resp(400, "开始时间需早于结束时间")
-            quota = _to_int(data.quota)
-            if quota is None or quota < 1:
-                return _resp(400, "名额需为正整数")
-            if quota < obj.booked:
-                return _resp(400, f"名额不得小于已订数（当前已订 {obj.booked} 人）")
             obj.start_time = start_dt
             obj.end_time = end_dt
-            obj.quota = quota
             obj.update_time = datetime.now()
             session.commit()
             audit("slot.update", user, info=info, target=f"slot#{obj.id}",
-                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)} 名额={quota}")
+                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)}")
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1275,13 +1256,13 @@ def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
 
 def view_advisor_slot_delete(info: Info, data: SlotIdInput) -> ApiResponse:
     """删除咨询时段：存在有效（booked）预约时拒绝；有历史预约记录时建议改用暂停。"""
-    user = _verify_advisor(info)
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             obj = _owned_slot(session, advisor, data.slot_id)
@@ -1313,7 +1294,7 @@ def view_advisor_slot_delete(info: Info, data: SlotIdInput) -> ApiResponse:
 
 def view_advisor_slot_state(info: Info, data: SlotStateInput) -> ApiResponse:
     """暂停/恢复咨询时段。"""
-    user = _verify_advisor(info)
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     if data.state not in ("1", "0"):
@@ -1321,7 +1302,7 @@ def view_advisor_slot_state(info: Info, data: SlotStateInput) -> ApiResponse:
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             obj = _owned_slot(session, advisor, data.slot_id)
@@ -1340,7 +1321,7 @@ def view_advisor_slot_state(info: Info, data: SlotStateInput) -> ApiResponse:
 
 
 # 批量上传模板列名（与 advisorSlotTemplate 下载一致）
-_SLOT_UPLOAD_COLUMNS = ("日期", "开始时间", "结束时间", "名额")
+_SLOT_UPLOAD_COLUMNS = ("日期", "开始时间", "结束时间")
 
 
 def _parse_upload_day(value: Any) -> str | None:
@@ -1376,36 +1357,19 @@ def _parse_upload_clock(value: Any) -> str | None:
     return f"{hour:02d}:{minute:02d}"
 
 
-def _parse_upload_quota(value: Any) -> int | None:
-    """解析上传单元格中的名额，自动转换为正整数。
-
-    - 兼容 Excel 数值型（int64/float64）与文本型（"2"、"2.0"、" 3 "）；
-    - 小数四舍五入取整（2.5 -> 2，2.6 -> 3，银行家舍入同 round 内置行为）；
-    - 留空返回默认 1；无法转换或结果 < 1 返回 None（由调用方计为失败行）。
-    """
-    if value is None or (not isinstance(value, str) and pd.isna(value)) \
-            or str(value).strip() == "":
-        return 1  # 名额留空按默认 1 人
-    try:
-        quota = int(round(float(str(value).strip())))
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return quota if quota >= 1 else None
-
-
 def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> ApiResponse:
-    """批量上传排期（.xlsx，列：日期/开始时间/结束时间/名额）。
+    """批量上传排期（.xlsx，列：日期/开始时间/结束时间）。
 
     逐行校验：解析失败/规则不符仅计为失败行并记录原因，不中断整批上传；
-    同顾问同起止时间的时段已存在时更新名额，否则新增。
+    同顾问同起止时间的时段已存在时视为成功（更新时间戳），否则新增。
     """
-    user = _verify_advisor(info)
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             if not data.file_base64:
@@ -1449,25 +1413,18 @@ def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> Ap
                         raise ValueError("开始时间需早于结束时间")
                     if start_dt <= now:
                         raise ValueError("只能创建未来的时段")
-                    quota = _parse_upload_quota(row.get("名额"))
-                    if quota is None:
-                        raise ValueError("名额需为正整数（留空按 1 人；小数自动取整）")
                     existing = _first(session, select(PaSlot).where(
                         PaSlot.advisor_id == advisor.id,
                         PaSlot.start_time == start_dt,
                         PaSlot.end_time == end_dt,
                     ))
                     if existing:
-                        if quota < existing.booked:
-                            raise ValueError(f"名额不得小于已订数（当前已订 {existing.booked} 人）")
-                        existing.quota = quota
                         existing.update_time = now
                     else:
                         session.add(PaSlot(
                             advisor_id=advisor.id,
                             start_time=start_dt,
                             end_time=end_dt,
-                            quota=quota,
                             booked=0,
                             state="1",
                         ))
@@ -1492,16 +1449,16 @@ def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> Ap
 
 
 def view_advisor_slot_template(info: Info) -> FileResponse:
-    """下载批量排期模板（xlsx：日期/开始时间/结束时间/名额 + 示例行）。"""
-    if not _verify_advisor(info):
+    """下载批量排期模板（xlsx：日期/开始时间/结束时间 + 示例行）。"""
+    if not _verify_admin(info):
         return FileResponse(code=401, msg="Token Error")
     try:
         wb = Workbook()
         ws = wb.active
         ws.append(list(_SLOT_UPLOAD_COLUMNS))
-        # 示例行：明天 10:00-11:00，名额 1
+        # 示例行：明天 10:00-11:00
         sample_day = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        ws.append([sample_day, "10:00", "11:00", 1])
+        ws.append([sample_day, "10:00", "11:00"])
         _style_header_row(ws, len(_SLOT_UPLOAD_COLUMNS))
         return _workbook_to_file(wb, "SlotTemplate.xlsx")
     except Exception as e:
@@ -1510,8 +1467,8 @@ def view_advisor_slot_template(info: Info) -> FileResponse:
 
 
 def view_advisor_accepting_set(info: Info, data: AcceptingSetInput) -> ApiResponse:
-    """设置「暂不接待」整体开关（accepting=0 时学生端不展示可约时段）。"""
-    user = _verify_advisor(info)
+    """设置顾问「暂不接待」整体开关（accepting=0 时学生端不展示可约时段，admin 代管）。"""
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     if data.accepting not in ("1", "0"):
@@ -1519,7 +1476,7 @@ def view_advisor_accepting_set(info: Info, data: AcceptingSetInput) -> ApiRespon
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             advisor.accepting = data.accepting
@@ -1535,19 +1492,22 @@ def view_advisor_accepting_set(info: Info, data: AcceptingSetInput) -> ApiRespon
 
 
 # ---------------------------
-# 顾问端 · 预约管理与反馈
+# 预约处理与反馈（管理端代管）
 # ---------------------------
 def _advisor_appointment_item(session, appt: PaAppointment, slot: PaSlot,
                               now: datetime, advisor_name: str = "") -> dict:
-    """顾问/管理端预约明细项（含反馈字段，反馈仅 advisor/admin 可见）。"""
+    """管理端预约明细项（含反馈字段，仅 admin 可见）。"""
     feedback = _first(session, select(PaFeedback).where(
         PaFeedback.appointment_id == appt.id
     ))
+    student = _first(session, select(PaUser).where(PaUser.id == appt.student_user_id))
     item = {
         "appointmentId": appt.id,
+        "advisorId": appt.advisor_id,
         "applyNo": appt.apply_no,
         "studentName": appt.student_name,
         "studentNo": appt.student_no,
+        "studentEmail": student.email if student else "",
         "startTime": _fmt_dt(slot.start_time),
         "endTime": _fmt_dt(slot.end_time),
         "topic": appt.topic,
@@ -1571,45 +1531,9 @@ def _advisor_appointment_item(session, appt: PaAppointment, slot: PaSlot,
     return item
 
 
-def view_advisor_my_appointment_list(info: Info, data: AdvisorAppointmentListInput) -> ApiResponse:
-    """顾问的预约列表（admin 需传 advisorId 代管；可按状态筛选）。"""
-    user = _verify_advisor(info)
-    if not user:
-        return _resp(401, "Token Error")
-    maker = get_session()
-    with maker() as session:
-        try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
-            if not advisor:
-                return _resp(400, err)
-            page, page_size = _clamp_page(data.page, data.page_size)
-            now = datetime.now()
-            query = (
-                select(PaAppointment, PaSlot)
-                .join(PaSlot, PaAppointment.slot_id == PaSlot.id)
-                .where(PaAppointment.advisor_id == advisor.id)
-            )
-            if data.state in VALID_APPOINTMENT_STATES:
-                query = query.where(PaAppointment.state == data.state)
-            total = _count(session, query)
-            rows = session.execute(
-                query.order_by(desc(PaSlot.start_time), desc(PaAppointment.id))
-                .offset((page - 1) * page_size).limit(page_size)
-            ).all()
-            detail = [
-                _advisor_appointment_item(session, appt, slot, now)
-                for appt, slot in rows
-            ]
-            return _resp(200, "success", {"total": total, "list": detail})
-        except Exception as e:
-            logger.error(f"{_rid()}{e}")
-            session.rollback()
-            return _resp(500, "服务器错误")
-
-
 def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> ApiResponse:
-    """顾问取消预约（须填取消原因；开始前 4 小时内禁止），双方邮件通知。"""
-    user = _verify_advisor(info)
+    """管理端代顾问取消预约（须填取消原因；开始前 4 小时内禁止），双方邮件通知。"""
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     reason = (data.reason or "").strip()
@@ -1618,7 +1542,7 @@ def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> Api
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             appt = _first(session, select(PaAppointment).where(
@@ -1657,7 +1581,7 @@ def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> Api
                 student_user=_first(session, select(PaUser).where(
                     PaUser.id == appt.student_user_id
                 )),
-                advisor_user=_advisor_user(session, advisor),
+                advisor_email=advisor.email,
             )
             session.commit()
             return _resp(200, "取消成功")
@@ -1669,13 +1593,13 @@ def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> Api
 
 def view_advisor_appointment_complete(info: Info, data: AdvisorCompleteInput) -> ApiResponse:
     """标记咨询完成（开始时间已过方可标记）。"""
-    user = _verify_advisor(info)
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             appt = _first(session, select(PaAppointment).where(
@@ -1702,15 +1626,15 @@ def view_advisor_appointment_complete(info: Info, data: AdvisorCompleteInput) ->
 
 
 def view_feedback_set(info: Info, data: FeedbackSetInput) -> ApiResponse:
-    """填写/更新咨询反馈（仅 completed 预约，upsert；反馈仅 advisor/admin 可见）。"""
-    user = _verify_advisor(info)
+    """填写/更新咨询反馈（仅 completed 预约，upsert；仅 admin）。"""
+    user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     need_followup = "1" if str(data.need_followup).strip() == "1" else "0"
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
+            advisor, err = _resolve_advisor(session, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             appt = _first(session, select(PaAppointment).where(
@@ -1744,18 +1668,18 @@ def view_feedback_set(info: Info, data: FeedbackSetInput) -> ApiResponse:
             return _resp(500, "服务器错误")
 
 
-def _append_appointment_rows(session, ws, rows, include_advisor: bool) -> None:
-    """预约导出公共行写入（rows 为 (appointment, slot) 列表）。"""
+def _append_appointment_rows(session, ws, rows) -> None:
+    """预约导出公共行写入（rows 为 (appointment, slot) 列表，恒含顾问列）。"""
     row_num = 0
     for appt, slot in rows:
         row_num += 1
-        values = [row_num, appt.apply_no]
-        if include_advisor:
-            advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == appt.advisor_id))
-            values.append(advisor.name if advisor else "N/A")
+        advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == appt.advisor_id))
+        values = [row_num, appt.apply_no, advisor.name if advisor else "N/A"]
+        student = _first(session, select(PaUser).where(PaUser.id == appt.student_user_id))
         values.extend([
             appt.student_name,
             appt.student_no,
+            student.email if student else "",
             _fmt_dt(slot.start_time),
             _fmt_dt(slot.end_time),
             appt.topic,
@@ -1771,39 +1695,6 @@ def _append_appointment_rows(session, ws, rows, include_advisor: bool) -> None:
         ws.append(values)
 
 
-def view_advisor_my_export(info: Info, data: AdvisorExportInput) -> FileResponse:
-    """顾问个人历史预约导出（Excel，base64）。"""
-    user = _verify_advisor(info)
-    if not user:
-        return FileResponse(code=401, msg="Token Error")
-    maker = get_session()
-    with maker() as session:
-        try:
-            advisor, err = _resolve_advisor(session, user, data.advisor_id)
-            if not advisor:
-                return FileResponse(code=400, msg=err)
-            rows = session.execute(
-                select(PaAppointment, PaSlot)
-                .join(PaSlot, PaAppointment.slot_id == PaSlot.id)
-                .where(PaAppointment.advisor_id == advisor.id)
-                .order_by(desc(PaSlot.start_time), desc(PaAppointment.id))
-            ).all()
-            wb = Workbook()
-            ws = wb.active
-            header = ["序号", "预约单号", "学生姓名", "学号", "开始时间", "结束时间",
-                      "咨询主题", "咨询内容", "方式", "电话", "微信", "会议链接",
-                      "状态", "取消原因", "创建时间"]
-            ws.append(header)
-            _append_appointment_rows(session, ws, rows, include_advisor=False)
-            _style_header_row(ws, len(header))
-            audit("export.my_appointments", user, info=info, detail=f"导出 {len(rows)} 行")
-            return _workbook_to_file(wb, "MyAppointments.xlsx")
-        except Exception as e:
-            logger.error(f"{_rid()}{e}")
-            session.rollback()
-            return FileResponse(code=500, msg="服务器错误")
-
-
 # ---------------------------
 # 管理后台 · 顾问管理（仅 admin）
 # ---------------------------
@@ -1815,12 +1706,12 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
     with maker() as session:
         try:
             page, page_size = _clamp_page(data.page, data.page_size)
-            query = select(PaAdvisor, PaUser).join(PaUser, PaAdvisor.user_id == PaUser.id)
+            query = select(PaAdvisor)
             keyword = data.keyword.strip()
             if keyword:
                 query = query.where(or_(
                     PaAdvisor.name.contains(keyword),
-                    PaUser.username.contains(keyword),
+                    PaAdvisor.username.contains(keyword),
                     PaAdvisor.major.contains(keyword),
                     PaAdvisor.direction.contains(keyword),
                 ))
@@ -1828,9 +1719,9 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
             rows = session.execute(
                 query.order_by(desc(PaAdvisor.id))
                 .offset((page - 1) * page_size).limit(page_size)
-            ).all()
+            ).scalars().all()
             detail = []
-            for advisor, acct in rows:
+            for advisor in rows:
                 slot_count = _count(session, select(PaSlot).where(
                     PaSlot.advisor_id == advisor.id
                 ))
@@ -1839,10 +1730,9 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
                 ))
                 detail.append({
                     "advisorId": advisor.id,
-                    "userId": acct.id,
-                    "username": acct.username,
+                    "username": advisor.username,
                     "name": advisor.name,
-                    "email": acct.email,
+                    "email": advisor.email,
                     "grade": advisor.grade,
                     "major": advisor.major,
                     "direction": advisor.direction,
@@ -1861,7 +1751,7 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
 
 
 def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> ApiResponse:
-    """创建顾问：建 pa_user（role=advisor，password="N/A"，走 SSO 登录）+ pa_advisor。"""
+    """创建顾问：仅建 pa_advisor 档案（不落 pa_user；顾问经 CUHK SSO 登录后按账号匹配档案）。"""
     user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1872,23 +1762,13 @@ def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> Ap
             name = data.name.strip()
             if not username or not name:
                 return _resp(400, "用户名与姓名不能为空")
-            existing = _first(session, select(PaUser.id).where(PaUser.username == username))
+            existing = _first(session, select(PaAdvisor.id).where(PaAdvisor.username == username))
             if existing:
-                return _resp(403, "用户名已存在")
-            acct = PaUser(
+                return _resp(403, "该登录账号已存在顾问档案")
+            advisor = PaAdvisor(
                 username=username,
-                password="N/A",  # 顾问走 CUHK SSO 登录，不设本地口令
-                key="N/A",
-                role="advisor",
                 name=name,
                 email=data.email.strip() or "N/A",
-                state="1",
-            )
-            session.add(acct)
-            session.flush()  # 取 user_id
-            advisor = PaAdvisor(
-                user_id=acct.id,
-                name=name,
                 grade=data.grade.strip() or "N/A",
                 major=data.major.strip() or "N/A",
                 direction=data.direction.strip() or "N/A",
@@ -1902,7 +1782,7 @@ def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> Ap
             logger.info(f"{_rid()}创建顾问：{username} {name}")
             audit("advisor.create", user, info=info, target=f"advisor#{advisor.id}",
                   detail=f"账号={username} 姓名={name}")
-            return _resp(200, "success", {"advisorId": advisor.id, "userId": acct.id})
+            return _resp(200, "success", {"advisorId": advisor.id})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
             session.rollback()
@@ -1920,14 +1800,11 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
             advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == data.advisor_id))
             if not advisor:
                 return _resp(404, "顾问不存在")
-            acct = _first(session, select(PaUser).where(PaUser.id == advisor.user_id))
             now = datetime.now()
             if data.name.strip():
                 advisor.name = data.name.strip()
-                if acct:
-                    acct.name = advisor.name
-            if data.email.strip() and acct:
-                acct.email = data.email.strip()
+            if data.email.strip():
+                advisor.email = data.email.strip()
             if data.grade.strip():
                 advisor.grade = data.grade.strip()
             if data.major.strip():
@@ -1940,16 +1817,9 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
                 advisor.photo = data.photo
             if data.status in ("1", "0"):
                 advisor.status = data.status
-                if acct:
-                    # 停用顾问同时停用其登录账号并失效会话
-                    acct.state = data.status
-                    if data.status == "0":
-                        acct.key = "N/A"
             if data.accepting in ("1", "0"):
                 advisor.accepting = data.accepting
             advisor.update_time = now
-            if acct:
-                acct.update_time = now
             session.commit()
             audit("advisor.update", user, info=info, target=f"advisor#{advisor.id}",
                   detail=f"姓名={advisor.name}")
@@ -1961,7 +1831,7 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
 
 
 def view_manage_advisor_delete(info: Info, data: ManageAdvisorIdInput) -> ApiResponse:
-    """删除顾问：有预约记录时拒绝并提示改用停用；连带删除排期与登录账号。"""
+    """删除顾问：有预约记录时拒绝并提示改用停用；连带删除排期（不涉及 pa_user）。"""
     user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1978,7 +1848,6 @@ def view_manage_advisor_delete(info: Info, data: ManageAdvisorIdInput) -> ApiRes
                 return _resp(403, "该顾问存在预约记录，不可删除，请改为停用")
             session.execute(delete(PaSlot).where(PaSlot.advisor_id == advisor.id))
             session.execute(delete(PaAdvisor).where(PaAdvisor.id == advisor.id))
-            session.execute(delete(PaUser).where(PaUser.id == advisor.user_id))
             session.commit()
             logger.info(f"{_rid()}删除顾问：{advisor.name}")
             audit("advisor.delete", user, info=info, target=f"advisor#{advisor.id}",
@@ -2196,11 +2065,12 @@ def view_manage_appointment_export(info: Info, data: ManageExportInput) -> FileR
                 return FileResponse(code=400, msg=err)
             wb = Workbook()
             ws = wb.active
-            header = ["序号", "预约单号", "顾问", "学生姓名", "学号", "开始时间", "结束时间",
+            header = ["序号", "预约单号", "顾问", "学生姓名", "学号", "邮箱",
+                      "开始时间", "结束时间",
                       "咨询主题", "咨询内容", "方式", "电话", "微信", "会议链接",
                       "状态", "取消原因", "创建时间"]
             ws.append(header)
-            _append_appointment_rows(session, ws, rows, include_advisor=True)
+            _append_appointment_rows(session, ws, rows)
             _style_header_row(ws, len(header))
             audit("export.appointments", user, info=info,
                   detail=f"advisor_id={data.advisor_id} month={data.month} 共 {len(rows)} 行")

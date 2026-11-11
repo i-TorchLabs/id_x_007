@@ -6,7 +6,7 @@
     {"ts","rid","action","result","user_id","username","role","target","detail","ip"}
 - TimedRotatingFileHandler(when="midnight")：每日 0 点轮转为
     id_x_007_audit.log.2026-11-06，过期文件自动清理；
-- 保留天数：环境变量 PA_AUDIT_RETAIN_DAYS（默认 90）；
+- 保留天数：固定 14 天，过期轮转文件自动清理；
 - 写入失败绝不影响业务（静默降级到引擎 logger 提示一次）；
 - 用户对象采用鸭子类型（PaUser/None 均可），与 ORM 解耦。
 """
@@ -38,11 +38,8 @@ def _default_log_dir() -> Path:
     return Path(__file__).resolve().parents[4] / "logs"
 
 
-def _retain_days() -> int:
-    try:
-        return max(1, int(os.environ.get("PA_AUDIT_RETAIN_DAYS", "90")))
-    except ValueError:
-        return 90
+# 审计日志保留天数（固定值，过期轮转文件由 handler 自动清理）
+AUDIT_RETAIN_DAYS = 14
 
 
 def _build_handler() -> logging.Handler:
@@ -51,7 +48,7 @@ def _build_handler() -> logging.Handler:
     handler = TimedRotatingFileHandler(
         log_dir / "id_x_007_audit.log",
         when="midnight",          # 每日 0 点轮转
-        backupCount=_retain_days(),  # 过期自动清理
+        backupCount=AUDIT_RETAIN_DAYS,  # 过期自动清理
         encoding="utf-8",
     )
     handler.setFormatter(logging.Formatter("%(message)s"))

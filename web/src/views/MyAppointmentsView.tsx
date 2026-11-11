@@ -21,6 +21,8 @@ export default function MyAppointmentsView() {
   const [itemCount, setItemCount] = useState(0);
   const [data, setData] = useState<MyAppointment[]>([]);
   const [cancelTarget, setCancelTarget] = useState<MyAppointment | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const getData = useCallback(
     async (pageNo = page) => {
@@ -48,16 +50,21 @@ export default function MyAppointmentsView() {
     getData(newPage);
   };
 
+  /** 取消预约（须填取消原因） */
   const handleCancel = async () => {
-    if (!cancelTarget) return;
+    if (!cancelTarget || !cancelReason.trim()) return;
+    setSubmitting(true);
     try {
-      await studentAppointmentCancelApi(cancelTarget.appointmentId);
+      await studentAppointmentCancelApi(cancelTarget.appointmentId, cancelReason.trim());
       toast.success(t("cancelled"));
+      setCancelTarget(null);
+      setCancelReason("");
       getData();
     } catch (error) {
       // 后端校验：距开始不足 4 小时等场景会拒绝
       toast.danger((error as Error).message || t("failToCancel"));
     }
+    setSubmitting(false);
   };
 
   const totalPages = Math.max(1, Math.ceil(itemCount / PAGE_SIZE));
@@ -144,7 +151,12 @@ export default function MyAppointmentsView() {
 
       <AlertDialog
         isOpen={!!cancelTarget}
-        onOpenChange={(open) => !open && setCancelTarget(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCancelTarget(null);
+            setCancelReason("");
+          }
+        }}
       >
         <AlertDialog.Backdrop>
           <AlertDialog.Container placement="center">
@@ -154,21 +166,35 @@ export default function MyAppointmentsView() {
                 <AlertDialog.Heading>{t("confirmCancelTitle")}</AlertDialog.Heading>
               </AlertDialog.Header>
               <AlertDialog.Body>
-                {t("confirmCancelBody", {
-                  applyNo: cancelTarget?.applyNo ?? "",
-                  advisorName: cancelTarget?.advisorName ?? "",
-                })}
+                <div className="mb-2">
+                  {t("confirmCancelBody", {
+                    applyNo: cancelTarget?.applyNo ?? "",
+                    advisorName: cancelTarget?.advisorName ?? "",
+                  })}
+                </div>
+                <textarea
+                  className="w-full h-20 rounded-lg border border-gray-300 p-2 text-sm"
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder={t("cancelReasonPlaceholder")}
+                />
+                <div className="mt-1 text-xs text-gray-500">{t("cancelReasonHint")}</div>
               </AlertDialog.Body>
               <AlertDialog.Footer>
-                <Button variant="ghost" onPress={() => setCancelTarget(null)}>
+                <Button
+                  variant="ghost"
+                  onPress={() => {
+                    setCancelTarget(null);
+                    setCancelReason("");
+                  }}
+                >
                   {t("back")}
                 </Button>
                 <Button
                   variant="danger"
-                  onPress={() => {
-                    setCancelTarget(null);
-                    handleCancel();
-                  }}
+                  isDisabled={!cancelReason.trim()}
+                  isPending={submitting}
+                  onPress={handleCancel}
                 >
                   {t("confirm")}
                 </Button>

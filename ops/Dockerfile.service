@@ -3,15 +3,29 @@ FROM ghcr.io/astral-sh/uv:0.9-python3.10-bookworm-slim AS builder
 
 WORKDIR /app/i-Core
 
+# 内网环境无法访问 deb.debian.org / pypi.org：APT 与 PyPI 均改走华为云镜像
+RUN set -eux; \
+    for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+        [ -f "$f" ] && sed -i 's|deb.debian.org|repo.huaweicloud.com|g; s|security.debian.org|repo.huaweicloud.com|g' "$f" || true; \
+    done
+
 # 容器内走 Postgres（宿主默认 DM8）：依赖清单由 ops/engine_compat 提供，不含 dmPython
 COPY x_models/id_x_007/ops/engine_compat/requirements.txt ./requirements.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && uv pip install --system --no-cache -r requirements.txt
+    && uv pip install --system --no-cache \
+       --index-url https://repo.huaweicloud.com/repository/pypi/simple \
+       -r requirements.txt
 
 FROM python:3.10-slim
 WORKDIR /app/i-Core
+
+# APT 换华为云镜像（python:3.10-slim 基于 Debian trixie，deb822 源文件）
+RUN set -eux; \
+    for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+        [ -f "$f" ] && sed -i 's|deb.debian.org|repo.huaweicloud.com|g; s|security.debian.org|repo.huaweicloud.com|g' "$f" || true; \
+    done
 
 # 运行时依赖：libpq（psycopg2）、curl（健康检查）、tzdata（时区数据）
 RUN apt-get update && apt-get install -y --no-install-recommends \
