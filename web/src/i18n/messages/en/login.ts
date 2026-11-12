@@ -2,7 +2,7 @@
 export default {
   brand: "UGO",
   brandSub: "Peer Consultant Consultation & Appointment Booking",
-  brandSlogan: "Book one-on-one consultations with peer advisors anytime.",
+  brandSlogan: "Book one-on-one consultations with peer consultants anytime.",
   title: "UGO Appointment Platform",
   loginTitle: "Login",
   registerTitle: "Admin Register",
@@ -28,7 +28,7 @@ export default {
   goRegister: "Register",
   or: "OR",
   ssoLogin: "CUHK SSO Login",
-  ssoTip: "Students and peer advisors please sign in with CUHK SSO.",
+  ssoTip: "Students and peer consultants please sign in with CUHK SSO.",
   // Validation & toasts
   validation: {
     required: "Email, name and password are required",

@@ -45,7 +45,7 @@ async function fetchLoginPublicKey(): Promise<CryptoKey> {
   );
   const pem = (data?.loginKey?.publicKey || "") as string;
   if (!pem) {
-    throw new Error("获取登录加密公钥失败");
+    throw new Error("Failed to fetch the login encryption public key");
   }
   return crypto.subtle.importKey(
     "spki",
@@ -76,7 +76,7 @@ export async function encryptLoginCredentials(
   // Web Crypto 仅在安全上下文（HTTPS/localhost）暴露，HTTP 访问时降级明文
   if (typeof window !== "undefined" && (!window.crypto || !window.crypto.subtle)) {
     console.warn(
-      "当前经 HTTP 访问，登录凭据将明文传输；生产环境建议启用 HTTPS（网关 TLS）以恢复加密传输"
+      "Served over plain HTTP: login credentials will be sent unencrypted. Enable HTTPS (gateway TLS) in production to restore encryption."
     );
     return { username, password, encrypted: false };
   }

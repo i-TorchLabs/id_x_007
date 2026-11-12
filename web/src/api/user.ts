@@ -52,7 +52,7 @@ export const loginApi = async (data: {
     return d as unknown as LoginData;
   }
   // 非 200：抛出携带完整 data 的错误，页面据此判断是否展示验证码
-  const err: any = new Error(resp.msg || "登录失败");
+  const err: any = new Error(resp.msg || "Login failed");
   err.code = resp.code;
   err.data = d || {};
   throw err;
@@ -81,8 +81,8 @@ export const registerApi = async (data: {
     }
   );
   const resp = res.register as ApiResponse<unknown>;
-  if (resp.code === 200) return resp.msg || "注册成功";
-  throw new Error(resp.msg || "注册失败");
+  if (resp.code === 200) return resp.msg || "Registered successfully";
+  throw new Error(resp.msg || "Registration failed");
 };
 
 /** SSO 登录：ADFS 授权码换取本系统会话。
@@ -113,7 +113,7 @@ export const logoutApi = async (userId: string): Promise<void> => {
   );
   const resp = data.logout as ApiResponse;
   if (resp.code !== 200) {
-    throw new Error(resp.msg || "登出失败");
+    throw new Error(resp.msg || "Logout failed");
   }
 };
 

@@ -33,7 +33,12 @@ function LayoutSider({ base, menuItems }: { base: string; menuItems: SideMenuIte
   const pathname = usePathname();
   const router = useRouter();
 
-  const activeKey = pathname.split("/").pop() ?? "";
+  // 末级路径为菜单 key 时命中；停留在 base 时记为首页
+  const lastSegment = pathname.split("/").filter(Boolean).pop() ?? "";
+  const activeKey = menuItems.some((item) => item.key === lastSegment) ? lastSegment : "home";
+
+  const isActive = (key: string) => activeKey === key;
+  const homeClass = isActive("home") ? "text-[#5b2a86] bg-[#f5f0fa]" : "text-gray-700";
 
   return (
     <aside
@@ -41,25 +46,60 @@ function LayoutSider({ base, menuItems }: { base: string; menuItems: SideMenuIte
       style={{ width: collapsed ? 64 : 200 }}
     >
       <nav className="flex-1 overflow-y-auto py-1">
-        <div>
-          <div className="flex items-center gap-2 px-4 py-2 text-gray-700" title={t("home")}>
-            <IoHomeOutline size={22} className="shrink-0" />
-            {!collapsed && <span className="font-bold">{t("home")}</span>}
-          </div>
-          {!collapsed &&
-            menuItems.map((item) => (
+        {collapsed ? (
+          // 收起态：仅显示图标，hover 以 title 提示，点击跳转
+          <div>
+            <div
+              onClick={() => router.push(base)}
+              className={`flex items-center justify-center h-10 mx-2 rounded cursor-pointer hover:bg-gray-100 ${homeClass}`}
+              title={t("home")}
+              aria-label={t("home")}
+              aria-current={isActive("home") ? "page" : undefined}
+            >
+              <IoHomeOutline size={22} className="shrink-0" />
+            </div>
+            {menuItems.map((item) => (
               <div
                 key={item.key}
                 onClick={() => router.push(`${base}/${item.key}`)}
-                className={`flex items-center gap-2 pl-10 pr-4 py-2 cursor-pointer text-gray-700 hover:bg-gray-100 ${
-                  activeKey === item.key ? "text-[#5b2a86] bg-[#f5f0fa] font-bold" : ""
+                className={`flex items-center justify-center h-10 mx-2 rounded cursor-pointer hover:bg-gray-100 ${
+                  isActive(item.key) ? "text-[#5b2a86] bg-[#f5f0fa]" : "text-gray-700"
                 }`}
+                title={item.label}
+                aria-label={item.label}
+                aria-current={isActive(item.key) ? "page" : undefined}
+              >
+                <item.icon size={22} className="shrink-0" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          // 展开态：图标 + 文案
+          <div>
+            <div
+              onClick={() => router.push(base)}
+              className={`flex items-center gap-2 px-4 py-2 cursor-pointer hover:bg-gray-100 ${homeClass}`}
+              title={t("home")}
+              aria-current={isActive("home") ? "page" : undefined}
+            >
+              <IoHomeOutline size={22} className="shrink-0" />
+              <span className={isActive("home") ? "font-bold" : ""}>{t("home")}</span>
+            </div>
+            {menuItems.map((item) => (
+              <div
+                key={item.key}
+                onClick={() => router.push(`${base}/${item.key}`)}
+                className={`flex items-center gap-2 pl-10 pr-4 py-2 cursor-pointer hover:bg-gray-100 ${
+                  isActive(item.key) ? "text-[#5b2a86] bg-[#f5f0fa] font-bold" : "text-gray-700"
+                }`}
+                aria-current={isActive(item.key) ? "page" : undefined}
               >
                 <item.icon size={22} className="shrink-0" />
                 <span>{item.label}</span>
               </div>
             ))}
-        </div>
+          </div>
+        )}
       </nav>
       <div
         className="flex justify-center items-center h-12 border-t border-gray-200 cursor-pointer text-gray-600 hover:bg-gray-100"

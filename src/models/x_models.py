@@ -282,21 +282,21 @@ def seed_sso_settings(conn: Connection) -> None:
 
 
 def seed_smtp_settings(conn: Connection) -> None:
-    """播种 SMTP 配置空白行（幂等：pa_smtp_settings 已有数据则跳过）。
+    """播种 SMTP 默认配置（幂等：pa_smtp_settings 已有数据则跳过）。
 
-    预置一行空配置便于运维直接 UPDATE 填写；host/username/password
-    为空时发信降级为 skipped 落库，不影响业务主流程。
+    预置 CUHK 邮件服务器配置（mail.cuhk.edu.cn:587 STARTTLS），
+    运行期运维可直接 UPDATE 首行调整，x_mail 实时读表即改即生效。
     """
     existing = conn.execute(select(PaSmtpSettings.id).limit(1)).first()
     if existing:
         return
     conn.execute(
         insert(PaSmtpSettings).values(
-            host="",
+            host="mail.cuhk.edu.cn",
             port=587,
-            username="",
-            password="",
-            mail_from="",
+            username="smeug@cuhk.edu.cn",
+            password="P@cuhksz2024!",
+            mail_from="smeug@cuhk.edu.cn",
             create_time=datetime.now(),
             update_time=datetime.now(),
         )

@@ -65,14 +65,14 @@ export async function graphqlRequest(
       body: JSON.stringify({ query, variables }),
     });
   } catch {
-    throw new Error("服务器异常，请稍后重试…");
+    throw new Error("Server error, please try again later…");
   }
   if (res.status !== 200) {
     throw new Error(res.status.toString());
   }
   const json = (await res.json()) as GraphQLPayload;
   if (json.errors && json.errors.length > 0) {
-    throw new Error(json.errors[0].message || "请求失败，未知异常");
+    throw new Error(json.errors[0].message || "Request failed: unknown error");
   }
   return json.data ?? {};
 }
@@ -105,7 +105,7 @@ export async function callApi<T = any>(
   if (resp.code === 401) {
     handleSessionExpired();
   }
-  throw new Error(resp.msg || "请求失败，未知异常");
+  throw new Error(resp.msg || "Request failed: unknown error");
 }
 
 /**
@@ -124,5 +124,5 @@ export async function callFileApi(
   if (resp.code === 401) {
     handleSessionExpired();
   }
-  throw new Error(resp.msg || "请求失败，未知异常");
+  throw new Error(resp.msg || "Request failed: unknown error");
 }

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { AlertDialog, Button } from "@heroui/react";
-import { IoExitOutline } from "react-icons/io5";
+import { IoCalendarOutline, IoExitOutline, IoPeopleOutline } from "react-icons/io5";
 import { useUserStore } from "@/context/UserContext";
 import LanguageToggle from "@/i18n/LanguageToggle";
 
@@ -25,8 +25,8 @@ export default function UserLayout({ children, title }: UserLayoutProps) {
   const activeKey = pathname.split("/").pop() ?? "";
 
   const navItems = [
-    { label: t("menuUser.advisors"), key: "advisors" },
-    { label: t("menuUser.myAppointments"), key: "record" },
+    { label: t("menuUser.advisors"), key: "advisors", icon: IoPeopleOutline },
+    { label: t("menuUser.myAppointments"), key: "record", icon: IoCalendarOutline },
   ];
 
   return (
@@ -39,13 +39,14 @@ export default function UserLayout({ children, title }: UserLayoutProps) {
               <div
                 key={item.key}
                 onClick={() => router.push(`${BASE}/${item.key}`)}
-                className={`flex items-center h-full px-4 cursor-pointer text-white/80 hover:text-white border-b-2 ${
+                className={`flex items-center gap-1.5 h-full px-4 cursor-pointer text-white/80 hover:text-white border-b-2 ${
                   activeKey === item.key
                     ? "border-white text-white font-bold"
                     : "border-transparent"
                 }`}
               >
-                {item.label}
+                <item.icon size={18} className="shrink-0" />
+                <span>{item.label}</span>
               </div>
             ))}
           </nav>

@@ -29,7 +29,7 @@ const genState = (): string => {
  */
 export const redirectToAdfsAuthorize = (): void => {
   if (!ADFS_CLIENT_ID) {
-    console.error("ADFS_CLIENT_ID 未配置，无法发起 SSO（请设置 NEXT_PUBLIC_ADFS_CLIENT_ID）");
+    console.error("ADFS_CLIENT_ID is not configured; cannot start SSO (set NEXT_PUBLIC_ADFS_CLIENT_ID).");
     toast.danger("SSO is not configured. Please contact the administrator.");
     return;
   }
