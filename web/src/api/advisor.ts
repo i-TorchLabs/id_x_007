@@ -1,16 +1,18 @@
 import { callApi, callFileApi, type FileResponse } from "./graphql";
 import { localToMs } from "@/utils/format";
+import type { ManageAppointmentListRes } from "./admin";
 
 /**
- * 顾问排期与预约处理 GraphQL API（排期 / 预约处理 / 反馈）
+ * 顾问排期与预约处理 GraphQL API（排期 / 预约处理 / 反馈 / 我的预约）
  * 说明:
- * - 顾问不设登录入口，以下接口均由管理后台调用，advisorId 必须传真实顾问 ID
+ * - advisor 本人（顾问门户）调用时 advisorId 留空（接口层转 0，后端绑定本人档案）；
+ *   admin 代管（管理后台）调用时 advisorId 必须传真实顾问 ID
  * - startTime/endTime 入参为毫秒时间戳字符串（datetime-local 值在此统一转换）
  * - 响应中的时间展示字段为后端已格式化字符串，直接展示；编辑回填用 startTimeMs/endTimeMs
  * - 布尔语义入参（accepting/needFollowup/state）为 String "1"/"0"
  */
 
-/** advisorId 统一转 Int（空串/未传 -> 0，后端会拒绝并要求指定顾问） */
+/** advisorId 统一转 Int（空串/未传 -> 0：advisor 本人；admin 代管时后端要求指定顾问） */
 const toAdvisorId = (v?: string | number): number => Number(v) || 0;
 
 /** File -> base64（不含 dataURL 前缀），批量上传用 */
@@ -169,7 +171,7 @@ export const advisorAcceptingSetApi = async (accepting: boolean, advisorId?: str
 // ===== 预约管理 =====
 
 
-/** 管理端代顾问取消预约（必填取消原因，邮件通知学生由后端处理） */
+/** 顾问取消预约（advisor 本人或 admin 代管；必填取消原因，邮件通知学生由后端处理） */
 export const advisorAppointmentCancelApi = async (
   appointmentId: string,
   reason: string,
@@ -190,7 +192,7 @@ export const advisorAppointmentCancelApi = async (
   );
 };
 
-/** 管理端代顾问标记完成 */
+/** 标记咨询完成（advisor 本人或 admin 代管） */
 export const advisorAppointmentCompleteApi = async (appointmentId: string, advisorId?: string) => {
   return await callApi(
     "advisorAppointmentComplete",
@@ -201,7 +203,46 @@ export const advisorAppointmentCompleteApi = async (appointmentId: string, advis
   );
 };
 
-/** 咨询反馈（新增/更新均走此接口，管理端代填；needFollowup 入参为 "1"/"0"） */
+/** 顾问预约明细（advisor 本人 advisorId 留空；admin 代管须传；复用管理端行结构） */
+export const advisorAppointmentListApi = async (data: {
+  page: number;
+  pageSize: number;
+  advisorId?: string;
+  date?: string;
+  state?: string;
+}) => {
+  return await callApi<ManageAppointmentListRes>(
+    "advisorAppointmentList",
+    `query AdvisorAppointmentList($data: ManageAppointmentListInput!) {
+      advisorAppointmentList(data: $data) { code msg data }
+    }`,
+    {
+      data: {
+        page: data.page,
+        pageSize: data.pageSize,
+        advisorId: toAdvisorId(data.advisorId),
+        date: data.date ?? "",
+        state: data.state ?? "",
+      },
+    }
+  );
+};
+
+/** 顾问个人历史预约导出（advisor 本人 advisorId 留空；月份 YYYY-MM，空串表示全量） */
+export const advisorAppointmentExportApi = async (data: {
+  advisorId?: string;
+  month?: string;
+}): Promise<FileResponse> => {
+  return await callFileApi(
+    "advisorAppointmentExport",
+    `query AdvisorAppointmentExport($data: ManageExportInput!) {
+      advisorAppointmentExport(data: $data) { code msg fileName fileBase64 }
+    }`,
+    { data: { advisorId: toAdvisorId(data.advisorId), month: data.month ?? "" } }
+  );
+};
+
+/** 咨询反馈（新增/更新均走此接口，advisor 本人或管理端代填；needFollowup 入参为 "1"/"0"） */
 export const feedbackSetApi = async (data: {
   appointmentId: string;
   summary: string;

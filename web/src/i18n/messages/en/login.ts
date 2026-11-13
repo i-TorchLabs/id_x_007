@@ -27,8 +27,10 @@ export default {
   needAccount: "Need an admin account?",
   goRegister: "Register",
   or: "OR",
-  ssoLogin: "CUHK SSO Login",
-  ssoTip: "Students and peer consultants please sign in with CUHK SSO.",
+  ssoLogin: "Student SSO Login",
+  advisorSsoLogin: "Consultant SSO Login",
+  ssoTip: "Students and consultants please sign in with CUHK SSO.",
+  advisorSsoTip: "Consultants please sign in with CUHK SSO (allowlisted accounts only); students please use the student login page.",
   // Validation & toasts
   validation: {
     required: "Email, name and password are required",

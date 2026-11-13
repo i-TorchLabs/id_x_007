@@ -11,6 +11,7 @@ import {
   type ManageAdvisor,
   type ManageAdvisorFormValue,
 } from "@/api/admin";
+import { useUserStore } from "@/context/UserContext";
 import Paginator from "@/components/pa/Paginator";
 import SwitchField from "@/components/pa/SwitchField";
 import { isTrue } from "@/utils/format";
@@ -39,6 +40,9 @@ const emptyForm: AdvisorForm = {
 
 export default function AdvisorManagementView() {
   const t = useTranslations("advisorManagement");
+  // 数据域：advisor 仅见/仅可编辑本人档案（后端列表已过滤），不可新增与删除
+  const { state: userState } = useUserStore();
+  const isAdminUser = userState.role === "admin";
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
@@ -209,9 +213,11 @@ export default function AdvisorManagementView() {
             {t("search")}
           </Button>
         </Form>
-        <Button variant="primary" onPress={() => openModal()}>
-          {t("add")}
-        </Button>
+        {isAdminUser && (
+          <Button variant="primary" onPress={() => openModal()}>
+            {t("add")}
+          </Button>
+        )}
       </div>
 
       <Table aria-label={t("advisorListAria")}>
@@ -260,9 +266,11 @@ export default function AdvisorManagementView() {
                             >
                               {t("edit")}
                             </Button>
-                            <Button size="sm" variant="danger" onPress={() => setDeleteTarget(row)}>
-                              {t("delete")}
-                            </Button>
+                            {isAdminUser && (
+                              <Button size="sm" variant="danger" onPress={() => setDeleteTarget(row)}>
+                                {t("delete")}
+                              </Button>
+                            )}
                           </Table.Cell>
                         );
                       default:

@@ -9,6 +9,7 @@ import appointmentManagement from "./en/appointmentManagement";
 import emailLog from "./en/emailLog";
 import feedback from "./en/feedback";
 import oauth from "./en/oauth";
+import permissionManagement from "./en/permissionManagement";
 
 /** English messages registry (namespace = view) */
 export const en = {
@@ -23,4 +24,5 @@ export const en = {
   emailLog,
   feedback,
   oauth,
+  permissionManagement,
 };

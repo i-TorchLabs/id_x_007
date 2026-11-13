@@ -2,6 +2,7 @@
 export default {
   missingCode: "无效的 OAuth 响应：缺少授权码",
   stateMismatch: "无效的 OAuth 响应：state 不一致",
+  failedTitle: "登录失败",
   failed: "登录失败，请重试。",
   backToLogin: "返回登录",
   loading: "加载中",

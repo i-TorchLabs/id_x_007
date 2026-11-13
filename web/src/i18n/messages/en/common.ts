@@ -14,11 +14,17 @@ export default {
   // Admin menu (AdminLayout)
   menuAdmin: {
     advisors: "Consultants",
+    permissions: "Permission Management",
     schedules: "Schedules",
     appointments: "Appointments",
     feedback: "Feedback",
     stats: "Stats",
     emailLogs: "Email Logs",
+  },
+  // Advisor menu (AdvisorLayout)
+  menuAdvisor: {
+    schedule: "My Schedule",
+    appointments: "My Appointments",
   },
   // Student menu (UserLayout)
   menuUser: {

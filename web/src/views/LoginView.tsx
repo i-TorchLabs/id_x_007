@@ -10,9 +10,9 @@ import { clearSsoLoginFlag, redirectToAdfsAuthorize } from "@/utils/sso";
 import LanguageToggle from "@/i18n/LanguageToggle";
 import PasswordInput from "@/components/pa/PasswordInput";
 
-/** 登录成功后按角色跳转 */
+/** 登录成功后按角色跳转（admin 与白名单顾问均进管理后台；权限管理模块仅 admin） */
 export const routeByRole = (role: string): string => {
-  if (role === "admin") return "/f/007/admin/advisor-management";
+  if (role === "admin" || role === "advisor") return "/f/007/admin/advisor-management";
   return "/f/007/user/advisors";
 };
 
@@ -270,16 +270,16 @@ export default function LoginView() {
               </div>
               {!isRegister && (
                 <>
-                  {/* 学生走 CUHK ADFS 单点登录（授权码流）；顾问不设登录入口 */}
+                  {/* 朋辈顾问走 CUHK ADFS 单点登录（授权码流，白名单内进入管理后台） */}
                   <div className="my-3 flex items-center gap-3 text-xs text-gray-400">
                     <div className="flex-1 border-t border-gray-300" />
                     {t("or")}
                     <div className="flex-1 border-t border-gray-300" />
                   </div>
-                  <Button fullWidth variant="secondary" onPress={() => redirectToAdfsAuthorize()}>
-                    {t("ssoLogin")}
+                  <Button fullWidth variant="secondary" onPress={() => redirectToAdfsAuthorize("advisor")}>
+                    {t("advisorSsoLogin")}
                   </Button>
-                  <div className="mt-2 text-xs text-gray-500 text-center">{t("ssoTip")}</div>
+                  <div className="mt-2 text-xs text-gray-500 text-center">{t("advisorSsoTip")}</div>
                 </>
               )}
             </div>

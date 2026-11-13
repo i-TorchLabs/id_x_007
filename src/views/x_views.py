@@ -5,8 +5,8 @@ UGO 咨询预约系统（pa 业务域），复刻插件化 GraphQL 架构：
 - 宿主 DB 契约为同步 SQLAlchemy（sessionmaker[Session]），全部视图为同步 def；
 - Token 从 GraphQL 请求头 Header "Token" 读取；
 - 文件下载以 base64 返回（FileResponse）；
-- 登录链路：admin/advisor 用户名密码（RSA 传输加密 + 防爆破 + 验证码），
-  student/advisor 走 CUHK SSO（ADFS OAuth2 授权码流）。
+- 登录链路：admin 用户名密码（RSA 传输加密 + 防爆破 + 验证码），
+  student/advisor 走 CUHK SSO（ADFS OAuth2 授权码流，advisor 按 pa_advisor.username 匹配档案）。
 """
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ from x_models.id_x_007.src.utils.x_audit import audit
 
 from x_models.id_x_007.src.models.x_models import (
     PaAdvisor,
+    PaAdvisorAllow,
     PaAppointment,
     PaEmailLog,
     PaFeedback,
@@ -63,6 +64,10 @@ from x_models.id_x_007.src.schemas.x_schemas import (
     ManageAdvisorIdInput,
     ManageAdvisorListInput,
     ManageAdvisorUpdateInput,
+    ManageAllowCreateInput,
+    ManageAllowIdInput,
+    ManageAllowListInput,
+    ManageAllowUpdateInput,
     ManageAppointmentListInput,
     ManageEmailLogListInput,
     ManageExportInput,
@@ -211,6 +216,12 @@ def _verify_admin(info: Info) -> PaUser | None:
     return user if (user and user.role == "admin") else None
 
 
+def _verify_admin_or_advisor(info: Info) -> PaUser | None:
+    """顾问域鉴权：admin（代管）或 advisor（本人自助）。"""
+    user = _get_user_by_token(info)
+    return user if (user and user.role in ("admin", "advisor")) else None
+
+
 def _first(session, stmt):
     return session.execute(stmt).scalars().first()
 
@@ -316,12 +327,41 @@ def _student_no_of(user: PaUser) -> str:
     return "N/A"
 
 
-def _resolve_advisor(session, advisor_id: Any) -> tuple[PaAdvisor | None, str]:
-    """定位操作目标顾问：顾问功能全部由管理员代管，须显式指定 advisorId。
+def _own_advisor_profile(session, user: PaUser) -> PaAdvisor | None:
+    """按登录账号匹配本人启用中的顾问档案（pa_advisor.username == pa_user.username）。"""
+    return _first(session, select(PaAdvisor).where(
+        PaAdvisor.username == user.username, PaAdvisor.status == "1"
+    ))
 
+
+def _manage_scope_advisor_id(session, user: PaUser) -> tuple[int, str]:
+    """管理端数据域：admin 返回 0（不限制），advisor 返回本人档案 id（只看本人数据）。
+
+    advisor 无启用中的本人档案时返回 (-1, 错误消息)。
+    """
+    if user.role == "admin":
+        return 0, ""
+    advisor = _own_advisor_profile(session, user)
+    if not advisor:
+        return -1, "顾问档案不存在或已停用"
+    return advisor.id, ""
+
+
+def _resolve_advisor_scope(session, user: PaUser, advisor_id: Any) -> tuple[PaAdvisor | None, str]:
+    """定位操作目标顾问（admin 代管 / advisor 本人自助）。
+
+    - admin：代管模式，须显式指定 advisorId；
+    - advisor：强制绑定本人档案（advisorId 留空或等于本人 id），指定他人 advisorId 视为越权。
     返回 (顾问对象, 错误消息)；成功时错误消息为空串。
     """
     aid = _to_int(advisor_id)
+    if user.role == "advisor":
+        advisor = _own_advisor_profile(session, user)
+        if not advisor:
+            return None, "顾问档案不存在或已停用"
+        if aid and aid != advisor.id:
+            return None, "无权操作其他顾问的数据"
+        return advisor, ""
     if not aid:
         return None, "请指定顾问（advisorId）"
     advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == aid))
@@ -569,7 +609,7 @@ def _decrypt_login_credentials(data: LoginInput) -> tuple[str, str] | None:
 
 
 def view_login(info: Info, data: LoginInput) -> ApiResponse:
-    """账号密码登录（仅 admin；student 一律走 CUHK SSO，顾问不设登录入口）。"""
+    """账号密码登录（仅 admin；student/advisor 一律走 CUHK SSO）。"""
     maker = get_session()
     with maker() as session:
         try:
@@ -600,10 +640,10 @@ def view_login(info: Info, data: LoginInput) -> ApiResponse:
                 check_password(DUMMY_HASH, password)  # 抹平时序，防用户名枚举
                 _record_login_failure(username)
                 return _login_fail_response(username, info)
-            if obj.role == "student":
-                # 学生禁止密码登录（无本地口令），引导走 SSO
-                audit("auth.login_fail", obj, info=info, result="fail", detail="学生账号尝试密码登录")
-                return _resp(403, "学生账号请使用 CUHK SSO 登录")
+            if obj.role in ("student", "advisor"):
+                # 学生/顾问禁止密码登录（无本地口令），引导走 SSO
+                audit("auth.login_fail", obj, info=info, result="fail", detail="学生/顾问账号尝试密码登录")
+                return _resp(403, "学生与朋辈顾问账号请使用 CUHK SSO 登录")
             if obj.state != "1":
                 audit("auth.login_fail", obj, info=info, result="fail", detail="账号已停用")
                 return _resp(403, "账号已停用")
@@ -612,7 +652,7 @@ def view_login(info: Info, data: LoginInput) -> ApiResponse:
                 audit("auth.login_fail", obj, info=info, result="fail", detail="账号待激活")
                 return _resp(403, "账号待激活，请联系运维人员激活后登录")
             if obj.password == "N/A":
-                # SSO 账号（student）无本地口令：禁止密码登录，防 "N/A" 明文兼容被利用
+                # SSO 账号（student/advisor）无本地口令：禁止密码登录，防 "N/A" 明文兼容被利用
                 check_password(DUMMY_HASH, password)
                 _record_login_failure(username)
                 return _login_fail_response(username, info)
@@ -646,7 +686,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def view_register(info: Info, data: RegisterInput) -> ApiResponse:
-    """管理员自助注册（/login 页入口）。
+    """管理员自助注册（/admin-login 页入口）。
 
     安全设计：
     - 以邮箱作为登录用户名（pa_user.username = email），不再单独输入用户名；
@@ -718,11 +758,18 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
     1. 前端经 ADFS /authorize 重定向回业务站点，携带 code；
     2. 本接口用 code + client_secret（仅服务端持有）到 /token 换 id_token；
     3. 验签 / 校验 id_token，提取 upn/email/name；
-    4. 按 username(=upn) 查 pa_user：无则自动建档为 student；
-       若账号已被管理员预建为 advisor，则以 advisor 身份登录；
-    5. 返回服务端签发的独立会话 token，不再暴露 IdP token。
+    4. 顾问白名单校验：portal=advisor（/admin-login 的顾问 SSO 按钮）发起的
+       登录一律校验；命中顾问档案的账号无论入口也校验（防伪造 portal 绕过）；
+       其余（学生走 /user-login）放行。SSO 邮箱（缺失时回退 upn）须在
+       pa_advisor_allow 表中且 allow=True，否则拒绝登录并提示联系系统管理员；
+    5. 按 username(=upn) 查 pa_user 并定角色：顾问入口（portal=advisor，已过
+       白名单）签发 advisor 会话，登录后进入管理后台 /admin/advisor-management
+       （后台对 advisor 开放，权限管理模块仅 admin）；学生入口按顾问档案有无定
+       advisor/student；账密管理员账号一律拒绝 SSO（防 admin 角色被降级）；
+       无档案则自动建档，老用户角色随本次入口/档案同步升降；
+    6. 返回服务端签发的独立会话 token，不再暴露 IdP token。
     """
-    logger.info(f"{_rid()}OAuth 登录请求: has_code={bool(data.code)} state_len={len(data.state or '')}")
+    logger.info(f"{_rid()}OAuth 登录请求: has_code={bool(data.code)} state_len={len(data.state or '')} portal={data.portal or 'N/A'}")
     payload_data: dict | None = None
     if _oauth_config_missing():
         logger.error(f"{_rid()}OAuth2 服务端配置缺失（pa_sso_settings 表无数据）")
@@ -786,18 +833,58 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                 logger.warning(f"{_rid()}OAuth upn 缺失，回退为 {upn}")
             name = str(identity.get("display_name") or "").strip() or "N/A"
 
+            # 顾问身份识别：upn 命中管理员预建且启用中的顾问档案即为 advisor
+            advisor_profile = _first(session, select(PaAdvisor).where(
+                PaAdvisor.username == upn, PaAdvisor.status == "1"
+            ))
+
+            # 顾问 SSO 登录白名单校验：从顾问入口（/admin-login 的
+            # Advisor SSO Login，portal=advisor）发起的登录一律校验；命中
+            # 顾问档案的账号无论入口也校验（防伪造 portal 绕过）；其余
+            # （学生走 /user-login）放行。邮箱（缺失时回退 upn）须在
+            # pa_advisor_allow 中且 allow=True；不区分大小写。
+            if data.portal == "advisor" or advisor_profile:
+                check_email = (email or upn).strip().lower()
+                allow_entry = _first(session, select(PaAdvisorAllow).where(
+                    func.lower(PaAdvisorAllow.email) == check_email
+                ))
+                if not allow_entry or not allow_entry.allow:
+                    logger.warning(f"{_rid()}顾问 SSO 登录被白名单拒绝: {check_email}")
+                    audit("auth.sso_login", None, username=upn, info=info, result="fail",
+                          detail=f"{check_email} 不在顾问 SSO 登录白名单")
+                    return _resp(
+                        403,
+                        f"登录失败，{check_email} 不是有效的顾问，"
+                        "请联系系统管理员 smeit@cuhk.edu.cn",
+                    )
+
             obj = _first(session, select(PaUser).where(PaUser.username == upn))
             if obj and obj.state != "1":
                 return _resp(403, "账号已停用")
+            # 账密管理员（password 非 N/A 为本地口令建档）不受理 SSO 登录，
+            # 防止其 admin 角色被降级；SSO 建档账号（password="N/A"）不受限
+            if obj and obj.role == "admin" and obj.password != "N/A":
+                logger.warning(f"{_rid()}admin 账号 {upn} 尝试 SSO 登录，已拒绝")
+                audit("auth.sso_login", obj, info=info, result="fail",
+                      detail="admin 账号不可走 SSO，请使用账号密码登录")
+                return _resp(403, "管理员账号请使用账号密码登录")
+
+            # 本次登录角色：顾问入口（Consultant SSO Login，已过白名单）签发
+            # advisor 会话，登录后进入管理后台（后台对 advisor 开放，权限管理
+            # 模块除外）；学生入口按顾问档案定 advisor/student
+            if data.portal == "advisor":
+                login_role = "advisor"
+            else:
+                login_role = "advisor" if advisor_profile else "student"
 
             session_key = secrets.token_urlsafe(32)
             if not obj:
-                # 首次 SSO 登录：自动建档为 student（无本地口令，password="N/A"）
+                # 首次 SSO 登录：自动建档（无本地口令，password="N/A"）
                 obj = PaUser(
                     username=upn,
                     password="N/A",
                     key=session_key,
-                    role="student",
+                    role=login_role,
                     name=name,
                     email=email or "N/A",
                     state="1",
@@ -805,7 +892,7 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                 session.add(obj)
                 session.commit()
                 session.refresh(obj)
-                logger.warning(f"{_rid()}SSO 新用户建档 {upn} {name} {email}")
+                logger.warning(f"{_rid()}SSO 新用户建档 {upn} {name} {email}（{obj.role}）")
             else:
                 # 老用户：统一签发新会话密钥；建档缺失的姓名/邮箱用 SSO 声明补全
                 obj.key = session_key
@@ -813,9 +900,16 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                     obj.name = name
                 if obj.email in ("", "N/A") and email:
                     obj.email = email
+                # 角色随本次登录入口/顾问档案升降（白名单移除或档案
+                # 停用后下次登录生效；账密管理员已在上方拦下不受影响）
+                obj.role = login_role
                 obj.update_time = datetime.now()
                 session.commit()
-            # 顾问不设登录入口：会话角色仅取本地账号角色（student/admin）
+            # 顾问档案邮箱缺失时用 SSO 声明补全（取消/提醒等邮件通知依赖该邮箱）
+            if advisor_profile and advisor_profile.email in ("", "N/A") and email:
+                advisor_profile.email = email
+                advisor_profile.update_time = datetime.now()
+                session.commit()
             role = obj.role
             logger.info(f"{_rid()}SSO 登录成功 {upn}（{role}）")
             audit("auth.sso_login", obj, info=info, detail="CUHK SSO 登录成功")
@@ -978,10 +1072,13 @@ def view_my_appointment_list(info: Info, data: PageInput) -> ApiResponse:
 
 
 def view_student_appointment_create(info: Info, data: AppointmentCreateInput) -> ApiResponse:
-    """学生预约：表单校验 + 24h 截止 + 行锁占用/重复校验 + 双方邮件通知。"""
+    """学生预约（仅 student）：表单校验 + 24h 截止 + 行锁占用/重复校验 + 双方邮件通知。"""
     user = _verify_token(info)
     if not user:
         return _resp(401, "Token Error")
+    if user.role != "student":
+        # 预约下单仅学生本人操作（admin/advisor 不代客预约）
+        return _resp(403, "仅学生可发起预约")
     # 表单校验（与前端联动规则一致）
     topic = (data.topic or "").strip()
     content = (data.content or "").strip()
@@ -1131,17 +1228,17 @@ def view_student_appointment_cancel(info: Info, data: AppointmentIdInput) -> Api
 
 
 # ---------------------------
-# 排期管理（管理端代管）
+# 排期管理（advisor 本人自助 / 管理端代管）
 # ---------------------------
 def view_advisor_my_slot_list(info: Info, data: AdvisorPageInput) -> ApiResponse:
-    """排期列表（管理端代管，须指定 advisorId）。"""
-    user = _verify_admin(info)
+    """排期列表（advisor 本人或 admin 代管；admin 须指定 advisorId）。"""
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             page, page_size = _clamp_page(data.page, data.page_size)
@@ -1174,14 +1271,14 @@ def view_advisor_my_slot_list(info: Info, data: AdvisorPageInput) -> ApiResponse
 
 
 def view_advisor_slot_create(info: Info, data: SlotCreateInput) -> ApiResponse:
-    """新增咨询时段（admin 代管，须指定 advisorId）。"""
-    user = _verify_admin(info)
+    """新增咨询时段（advisor 本人或 admin 代管；admin 须指定 advisorId）。"""
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             start_dt = _parse_dt(data.start_time)
@@ -1223,13 +1320,13 @@ def _owned_slot(session, advisor: PaAdvisor, slot_id: Any) -> PaSlot | None:
 
 def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
     """修改咨询时段（起止时间）。"""
-    user = _verify_admin(info)
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             obj = _owned_slot(session, advisor, data.slot_id)
@@ -1256,13 +1353,13 @@ def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
 
 def view_advisor_slot_delete(info: Info, data: SlotIdInput) -> ApiResponse:
     """删除咨询时段：存在有效（booked）预约时拒绝；有历史预约记录时建议改用暂停。"""
-    user = _verify_admin(info)
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             obj = _owned_slot(session, advisor, data.slot_id)
@@ -1294,7 +1391,7 @@ def view_advisor_slot_delete(info: Info, data: SlotIdInput) -> ApiResponse:
 
 def view_advisor_slot_state(info: Info, data: SlotStateInput) -> ApiResponse:
     """暂停/恢复咨询时段。"""
-    user = _verify_admin(info)
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     if data.state not in ("1", "0"):
@@ -1302,7 +1399,7 @@ def view_advisor_slot_state(info: Info, data: SlotStateInput) -> ApiResponse:
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             obj = _owned_slot(session, advisor, data.slot_id)
@@ -1363,13 +1460,13 @@ def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> Ap
     逐行校验：解析失败/规则不符仅计为失败行并记录原因，不中断整批上传；
     同顾问同起止时间的时段已存在时视为成功（更新时间戳），否则新增。
     """
-    user = _verify_admin(info)
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             if not data.file_base64:
@@ -1450,7 +1547,7 @@ def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> Ap
 
 def view_advisor_slot_template(info: Info) -> FileResponse:
     """下载批量排期模板（xlsx：日期/开始时间/结束时间 + 示例行）。"""
-    if not _verify_admin(info):
+    if not _verify_admin_or_advisor(info):
         return FileResponse(code=401, msg="Token Error")
     try:
         wb = Workbook()
@@ -1467,8 +1564,8 @@ def view_advisor_slot_template(info: Info) -> FileResponse:
 
 
 def view_advisor_accepting_set(info: Info, data: AcceptingSetInput) -> ApiResponse:
-    """设置顾问「暂不接待」整体开关（accepting=0 时学生端不展示可约时段，admin 代管）。"""
-    user = _verify_admin(info)
+    """设置顾问「暂不接待」整体开关（accepting=0 时学生端不展示可约时段；advisor 本人或 admin 代管）。"""
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     if data.accepting not in ("1", "0"):
@@ -1476,7 +1573,7 @@ def view_advisor_accepting_set(info: Info, data: AcceptingSetInput) -> ApiRespon
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             advisor.accepting = data.accepting
@@ -1492,11 +1589,11 @@ def view_advisor_accepting_set(info: Info, data: AcceptingSetInput) -> ApiRespon
 
 
 # ---------------------------
-# 预约处理与反馈（管理端代管）
+# 预约处理与反馈（advisor 本人自助 / 管理端代管）
 # ---------------------------
 def _advisor_appointment_item(session, appt: PaAppointment, slot: PaSlot,
                               now: datetime, advisor_name: str = "") -> dict:
-    """管理端预约明细项（含反馈字段，仅 admin 可见）。"""
+    """预约明细项（含反馈字段，仅 admin 与顾问本人可见）。"""
     feedback = _first(session, select(PaFeedback).where(
         PaFeedback.appointment_id == appt.id
     ))
@@ -1532,8 +1629,8 @@ def _advisor_appointment_item(session, appt: PaAppointment, slot: PaSlot,
 
 
 def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> ApiResponse:
-    """管理端代顾问取消预约（须填取消原因；开始前 4 小时内禁止），双方邮件通知。"""
-    user = _verify_admin(info)
+    """顾问取消预约（advisor 本人或 admin 代管；须填取消原因；开始前 4 小时内禁止），双方邮件通知。"""
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     reason = (data.reason or "").strip()
@@ -1542,7 +1639,7 @@ def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> Api
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             appt = _first(session, select(PaAppointment).where(
@@ -1593,13 +1690,13 @@ def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> Api
 
 def view_advisor_appointment_complete(info: Info, data: AdvisorCompleteInput) -> ApiResponse:
     """标记咨询完成（开始时间已过方可标记）。"""
-    user = _verify_admin(info)
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             appt = _first(session, select(PaAppointment).where(
@@ -1626,15 +1723,15 @@ def view_advisor_appointment_complete(info: Info, data: AdvisorCompleteInput) ->
 
 
 def view_feedback_set(info: Info, data: FeedbackSetInput) -> ApiResponse:
-    """填写/更新咨询反馈（仅 completed 预约，upsert；仅 admin）。"""
-    user = _verify_admin(info)
+    """填写/更新咨询反馈（仅 completed 预约，upsert；advisor 本人或 admin 代管）。"""
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     need_followup = "1" if str(data.need_followup).strip() == "1" else "0"
     maker = get_session()
     with maker() as session:
         try:
-            advisor, err = _resolve_advisor(session, data.advisor_id)
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
             appt = _first(session, select(PaAppointment).where(
@@ -1696,17 +1793,99 @@ def _append_appointment_rows(session, ws, rows) -> None:
 
 
 # ---------------------------
+# 顾问端 · 我的预约（advisor 本人自助 / 管理端代管）
+# ---------------------------
+def view_advisor_appointment_list(info: Info, data: ManageAppointmentListInput) -> ApiResponse:
+    """顾问预约明细（advisor 仅本人；admin 代管须指定 advisorId；可按日期/状态筛选）。"""
+    user = _verify_admin_or_advisor(info)
+    if not user:
+        return _resp(401, "Token Error")
+    maker = get_session()
+    with maker() as session:
+        try:
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
+            if not advisor:
+                return _resp(400, err)
+            page, page_size = _clamp_page(data.page, data.page_size)
+            now = datetime.now()
+            query = select(PaAppointment, PaSlot).join(
+                PaSlot, PaAppointment.slot_id == PaSlot.id
+            ).where(PaAppointment.advisor_id == advisor.id)
+            if data.date.strip():
+                day = _day_range(data.date)
+                if not day:
+                    return _resp(400, "日期格式不合法（YYYY-MM-DD）")
+                query = query.where(PaSlot.start_time >= day[0], PaSlot.start_time < day[1])
+            if data.state in VALID_APPOINTMENT_STATES:
+                query = query.where(PaAppointment.state == data.state)
+            total = _count(session, query)
+            rows = session.execute(
+                query.order_by(desc(PaSlot.start_time), desc(PaAppointment.id))
+                .offset((page - 1) * page_size).limit(page_size)
+            ).all()
+            detail = [
+                _advisor_appointment_item(session, appt, slot, now)
+                for appt, slot in rows
+            ]
+            return _resp(200, "success", {
+                "total": total,
+                "list": detail,
+                "advisorId": advisor.id,
+            })
+        except Exception as e:
+            logger.error(f"{_rid()}{e}")
+            session.rollback()
+            return _resp(500, "服务器错误")
+
+
+def view_advisor_appointment_export(info: Info, data: ManageExportInput) -> FileResponse:
+    """顾问个人历史预约导出（advisor 仅本人；admin 代管须指定 advisorId；可按月份过滤，Excel base64）。"""
+    user = _verify_admin_or_advisor(info)
+    if not user:
+        return FileResponse(code=401, msg="Token Error")
+    maker = get_session()
+    with maker() as session:
+        try:
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
+            if not advisor:
+                return FileResponse(code=400, msg=err)
+            rows, err = _filtered_appointment_rows(session, advisor.id, data.month)
+            if rows is None:
+                return FileResponse(code=400, msg=err)
+            wb = Workbook()
+            ws = wb.active
+            header = ["序号", "预约单号", "顾问", "学生姓名", "学号", "邮箱",
+                      "开始时间", "结束时间",
+                      "咨询主题", "咨询内容", "方式", "电话", "微信", "会议链接",
+                      "状态", "取消原因", "创建时间"]
+            ws.append(header)
+            _append_appointment_rows(session, ws, rows)
+            _style_header_row(ws, len(header))
+            audit("export.my_appointments", user, info=info,
+                  detail=f"advisor_id={advisor.id} month={data.month} 共 {len(rows)} 行")
+            return _workbook_to_file(wb, "MyAppointmentExport.xlsx")
+        except Exception as e:
+            logger.error(f"{_rid()}{e}")
+            session.rollback()
+            return FileResponse(code=500, msg="服务器错误")
+
+
+# ---------------------------
 # 管理后台 · 顾问管理（仅 admin）
 # ---------------------------
 def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiResponse:
-    """顾问列表（分页，keyword 匹配姓名/用户名/专业/方向）。"""
-    if not _verify_admin(info):
+    """顾问列表（分页，keyword 匹配姓名/用户名/专业/方向；advisor 仅见本人档案）。"""
+    user = _verify_admin_or_advisor(info)
+    if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
             page, page_size = _clamp_page(data.page, data.page_size)
             query = select(PaAdvisor)
+            # 数据域：advisor 只能看到本人档案（admin 不限制）
+            if user.role == "advisor":
+                query = query.where(PaAdvisor.username == user.username)
             keyword = data.keyword.strip()
             if keyword:
                 query = query.where(or_(
@@ -1751,7 +1930,7 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
 
 
 def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> ApiResponse:
-    """创建顾问：仅建 pa_advisor 档案（不落 pa_user；顾问经 CUHK SSO 登录后按账号匹配档案）。"""
+    """创建顾问（仅 admin）：仅建 pa_advisor 档案（不落 pa_user；顾问经 CUHK SSO 登录后按账号匹配档案）。"""
     user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1791,7 +1970,7 @@ def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> Ap
 
 def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> ApiResponse:
     """更新顾问档案（留空字段不变；status/accepting 同步控制）。"""
-    user = _verify_admin(info)
+    user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
@@ -1800,6 +1979,9 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
             advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == data.advisor_id))
             if not advisor:
                 return _resp(404, "顾问不存在")
+            # 数据域：advisor 只能修改本人档案
+            if user.role == "advisor" and advisor.username != user.username:
+                return _resp(403, "仅可修改本人档案")
             now = datetime.now()
             if data.name.strip():
                 advisor.name = data.name.strip()
@@ -1831,7 +2013,7 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
 
 
 def view_manage_advisor_delete(info: Info, data: ManageAdvisorIdInput) -> ApiResponse:
-    """删除顾问：有预约记录时拒绝并提示改用停用；连带删除排期（不涉及 pa_user）。"""
+    """删除顾问（仅 admin）：有预约记录时拒绝并提示改用停用；连带删除排期（不涉及 pa_user）。"""
     user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1859,23 +2041,151 @@ def view_manage_advisor_delete(info: Info, data: ManageAdvisorIdInput) -> ApiRes
             return _resp(500, "服务器错误")
 
 
+
 # ---------------------------
-# 管理后台 · 预约 / 反馈 / 统计 / 邮件日志
+# 管理后台 · 权限管理（顾问 SSO 登录白名单）
 # ---------------------------
-def view_manage_appointment_list(info: Info, data: ManageAppointmentListInput) -> ApiResponse:
-    """全量预约明细（可按顾问/日期/状态筛选；date 按咨询开始时间过滤）。"""
+def view_manage_allow_list(info: Info, data: ManageAllowListInput) -> ApiResponse:
+    """顾问 SSO 登录白名单列表（分页，keyword 匹配邮箱，仅 admin）。"""
     if not _verify_admin(info):
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
             page, page_size = _clamp_page(data.page, data.page_size)
+            query = select(PaAdvisorAllow)
+            keyword = data.keyword.strip()
+            if keyword:
+                query = query.where(PaAdvisorAllow.email.contains(keyword))
+            total = _count(session, query)
+            rows = session.execute(
+                query.order_by(desc(PaAdvisorAllow.id))
+                .offset((page - 1) * page_size).limit(page_size)
+            ).scalars().all()
+            detail = [{
+                "allowId": row.id,
+                "email": row.email,
+                "allow": "1" if row.allow else "0",
+                "createTime": row.create_time.strftime("%Y-%m-%d %H:%M:%S") if row.create_time else "",
+                "updateTime": row.update_time.strftime("%Y-%m-%d %H:%M:%S") if row.update_time else "",
+            } for row in rows]
+            return _resp(200, "success", {"total": total, "list": detail})
+        except Exception as e:
+            logger.error(f"{_rid()}{e}")
+            session.rollback()
+            return _resp(500, "服务器错误")
+
+
+def view_manage_allow_create(info: Info, data: ManageAllowCreateInput) -> ApiResponse:
+    """新增白名单记录（邮箱唯一，不区分大小写）。"""
+    user = _verify_admin(info)
+    if not user:
+        return _resp(401, "Token Error")
+    maker = get_session()
+    with maker() as session:
+        try:
+            email = data.email.strip()
+            if not email:
+                return _resp(400, "邮箱不能为空")
+            existing = _first(session, select(PaAdvisorAllow.id).where(
+                func.lower(PaAdvisorAllow.email) == email.lower()
+            ))
+            if existing:
+                return _resp(403, "该邮箱已在白名单中")
+            entry = PaAdvisorAllow(email=email, allow=data.allow != "0")
+            session.add(entry)
+            session.commit()
+            logger.info(f"{_rid()}新增白名单：{email} allow={entry.allow}")
+            audit("allow.create", user, info=info, target=f"allow#{entry.id}",
+                  detail=f"邮箱={email} 允许={'是' if entry.allow else '否'}")
+            return _resp(200, "success", {"allowId": entry.id})
+        except Exception as e:
+            logger.error(f"{_rid()}{e}")
+            session.rollback()
+            return _resp(500, "服务器错误")
+
+
+def view_manage_allow_update(info: Info, data: ManageAllowUpdateInput) -> ApiResponse:
+    """更新白名单记录（邮箱留空不变；allow 传 1/0，留空不变）。"""
+    user = _verify_admin(info)
+    if not user:
+        return _resp(401, "Token Error")
+    maker = get_session()
+    with maker() as session:
+        try:
+            entry = _first(session, select(PaAdvisorAllow).where(PaAdvisorAllow.id == data.allow_id))
+            if not entry:
+                return _resp(404, "白名单记录不存在")
+            email = data.email.strip()
+            if email and email.lower() != entry.email.lower():
+                conflict = _first(session, select(PaAdvisorAllow.id).where(
+                    func.lower(PaAdvisorAllow.email) == email.lower(),
+                    PaAdvisorAllow.id != entry.id,
+                ))
+                if conflict:
+                    return _resp(403, "该邮箱已在白名单中")
+            if email:
+                entry.email = email
+            if data.allow in ("1", "0"):
+                entry.allow = data.allow == "1"
+            entry.update_time = datetime.now()
+            session.commit()
+            audit("allow.update", user, info=info, target=f"allow#{entry.id}",
+                  detail=f"邮箱={entry.email} 允许={'是' if entry.allow else '否'}")
+            return _resp(200, "success")
+        except Exception as e:
+            logger.error(f"{_rid()}{e}")
+            session.rollback()
+            return _resp(500, "服务器错误")
+
+
+def view_manage_allow_delete(info: Info, data: ManageAllowIdInput) -> ApiResponse:
+    """删除白名单记录（移除后该顾问邮箱将无法 SSO 登录）。"""
+    user = _verify_admin(info)
+    if not user:
+        return _resp(401, "Token Error")
+    maker = get_session()
+    with maker() as session:
+        try:
+            entry = _first(session, select(PaAdvisorAllow).where(PaAdvisorAllow.id == data.allow_id))
+            if not entry:
+                return _resp(404, "白名单记录不存在")
+            email = entry.email
+            session.execute(delete(PaAdvisorAllow).where(PaAdvisorAllow.id == entry.id))
+            session.commit()
+            logger.info(f"{_rid()}删除白名单：{email}")
+            audit("allow.delete", user, info=info, target=f"allow#{data.allow_id}",
+                  detail=f"邮箱={email}")
+            return _resp(200, "success")
+        except Exception as e:
+            logger.error(f"{_rid()}{e}")
+            session.rollback()
+            return _resp(500, "服务器错误")
+
+
+# ---------------------------
+# 管理后台 · 预约 / 反馈 / 统计 / 邮件日志
+# ---------------------------
+def view_manage_appointment_list(info: Info, data: ManageAppointmentListInput) -> ApiResponse:
+    """全量预约明细（可按顾问/日期/状态筛选；advisor 仅见本人数据）。"""
+    user = _verify_admin_or_advisor(info)
+    if not user:
+        return _resp(401, "Token Error")
+    maker = get_session()
+    with maker() as session:
+        try:
+            # 数据域：advisor 强制限定本人（忽略入参 advisorId），admin 不限制
+            scope_id, err = _manage_scope_advisor_id(session, user)
+            if scope_id < 0:
+                return _resp(400, err)
+            page, page_size = _clamp_page(data.page, data.page_size)
             now = datetime.now()
             query = select(PaAppointment, PaSlot).join(
                 PaSlot, PaAppointment.slot_id == PaSlot.id
             )
-            if _to_int(data.advisor_id):
-                query = query.where(PaAppointment.advisor_id == int(data.advisor_id))
+            advisor_filter = scope_id or _to_int(data.advisor_id)
+            if advisor_filter:
+                query = query.where(PaAppointment.advisor_id == advisor_filter)
             if data.date.strip():
                 day = _day_range(data.date)
                 if not day:
@@ -1903,20 +2213,26 @@ def view_manage_appointment_list(info: Info, data: ManageAppointmentListInput) -
 
 
 def view_manage_feedback_list(info: Info, data: ManageFeedbackListInput) -> ApiResponse:
-    """反馈列表（可按顾问/月份筛选；month 按咨询开始时间所在月过滤）。"""
-    if not _verify_admin(info):
+    """反馈列表（可按顾问/月份筛选；advisor 仅见本人数据）。"""
+    user = _verify_admin_or_advisor(info)
+    if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
+            # 数据域：advisor 强制限定本人（忽略入参 advisorId），admin 不限制
+            scope_id, err = _manage_scope_advisor_id(session, user)
+            if scope_id < 0:
+                return _resp(400, err)
             page, page_size = _clamp_page(data.page, data.page_size)
             query = (
                 select(PaFeedback, PaAppointment, PaSlot)
                 .join(PaAppointment, PaFeedback.appointment_id == PaAppointment.id)
                 .join(PaSlot, PaAppointment.slot_id == PaSlot.id)
             )
-            if _to_int(data.advisor_id):
-                query = query.where(PaFeedback.advisor_id == int(data.advisor_id))
+            advisor_filter = scope_id or _to_int(data.advisor_id)
+            if advisor_filter:
+                query = query.where(PaFeedback.advisor_id == advisor_filter)
             if data.month.strip():
                 rng = _month_range(data.month)
                 if not rng:
@@ -1955,31 +2271,44 @@ def view_manage_feedback_list(info: Info, data: ManageFeedbackListInput) -> ApiR
 
 
 def view_manage_stats(info: Info) -> ApiResponse:
-    """运营统计：总量/完成/取消/进行中 + 各顾问咨询量排名。"""
-    if not _verify_admin(info):
+    """运营统计：总量/完成/取消/进行中 + 各顾问咨询量排名（advisor 仅本人口径）。"""
+    user = _verify_admin_or_advisor(info)
+    if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            total = _count(session, select(PaAppointment))
-            completed = _count(session, select(PaAppointment).where(
+            # 数据域：advisor 各项指标与排名均只统计本人预约，admin 为全量
+            scope_id, err = _manage_scope_advisor_id(session, user)
+            if scope_id < 0:
+                return _resp(400, err)
+            base = select(PaAppointment)
+            if scope_id:
+                base = base.where(PaAppointment.advisor_id == scope_id)
+            total = _count(session, base)
+            completed = _count(session, base.where(
                 PaAppointment.state == "completed"
             ))
-            cancelled = _count(session, select(PaAppointment).where(
+            cancelled = _count(session, base.where(
                 PaAppointment.state.in_(("cancelled_student", "cancelled_advisor"))
             ))
-            booked = _count(session, select(PaAppointment).where(
+            booked = _count(session, base.where(
                 PaAppointment.state == "booked"
             ))
             # 各顾问咨询量（全部预约）与完成量，按咨询量降序
-            count_rows = session.execute(
-                select(PaAppointment.advisor_id, func.count(PaAppointment.id))
-                .group_by(PaAppointment.advisor_id)
-            ).all()
-            completed_map = dict(session.execute(
+            count_query = select(PaAppointment.advisor_id, func.count(PaAppointment.id))
+            completed_query = (
                 select(PaAppointment.advisor_id, func.count(PaAppointment.id))
                 .where(PaAppointment.state == "completed")
-                .group_by(PaAppointment.advisor_id)
+            )
+            if scope_id:
+                count_query = count_query.where(PaAppointment.advisor_id == scope_id)
+                completed_query = completed_query.where(PaAppointment.advisor_id == scope_id)
+            count_rows = session.execute(
+                count_query.group_by(PaAppointment.advisor_id)
+            ).all()
+            completed_map = dict(session.execute(
+                completed_query.group_by(PaAppointment.advisor_id)
             ).all())
             ranking = []
             for advisor_id, count in sorted(count_rows, key=lambda r: -r[1]):
@@ -2003,14 +2332,23 @@ def view_manage_stats(info: Info) -> ApiResponse:
 
 
 def view_manage_email_log_list(info: Info, data: ManageEmailLogListInput) -> ApiResponse:
-    """邮件发送日志（分页，可按类型筛选）。"""
-    if not _verify_admin(info):
+    """邮件发送日志（分页，可按类型筛选；advisor 仅见本人预约关联的邮件）。"""
+    user = _verify_admin_or_advisor(info)
+    if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
             page, page_size = _clamp_page(data.page, data.page_size)
             query = select(PaEmailLog)
+            # 数据域：advisor 只能看到本人预约关联的邮件（admin 不限制）
+            scope_id, err = _manage_scope_advisor_id(session, user)
+            if scope_id < 0:
+                return _resp(400, err)
+            if scope_id:
+                query = query.where(PaEmailLog.appointment_id.in_(
+                    select(PaAppointment.id).where(PaAppointment.advisor_id == scope_id)
+                ))
             if data.mail_type.strip():
                 query = query.where(PaEmailLog.mail_type == data.mail_type.strip())
             total = _count(session, query)
@@ -2053,14 +2391,20 @@ def _filtered_appointment_rows(session, advisor_id: Any, month: str):
 
 
 def view_manage_appointment_export(info: Info, data: ManageExportInput) -> FileResponse:
-    """管理端全量预约导出（可按顾问/月份过滤，Excel base64）。"""
-    user = _verify_admin(info)
+    """管理端全量预约导出（可按顾问/月份过滤；advisor 仅导出本人数据）。"""
+    user = _verify_admin_or_advisor(info)
     if not user:
         return FileResponse(code=401, msg="Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            rows, err = _filtered_appointment_rows(session, data.advisor_id, data.month)
+            # 数据域：advisor 强制限定本人（忽略入参 advisorId），admin 不限制
+            scope_id, scope_err = _manage_scope_advisor_id(session, user)
+            if scope_id < 0:
+                return FileResponse(code=400, msg=scope_err)
+            rows, err = _filtered_appointment_rows(
+                session, scope_id or data.advisor_id, data.month
+            )
             if rows is None:
                 return FileResponse(code=400, msg=err)
             wb = Workbook()
@@ -2082,20 +2426,25 @@ def view_manage_appointment_export(info: Info, data: ManageExportInput) -> FileR
 
 
 def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResponse:
-    """反馈汇总导出（可按顾问/月份过滤，Excel base64）。"""
-    user = _verify_admin(info)
+    """反馈汇总导出（可按顾问/月份过滤；advisor 仅导出本人数据）。"""
+    user = _verify_admin_or_advisor(info)
     if not user:
         return FileResponse(code=401, msg="Token Error")
     maker = get_session()
     with maker() as session:
         try:
+            # 数据域：advisor 强制限定本人（忽略入参 advisorId），admin 不限制
+            scope_id, scope_err = _manage_scope_advisor_id(session, user)
+            if scope_id < 0:
+                return FileResponse(code=400, msg=scope_err)
             query = (
                 select(PaFeedback, PaAppointment, PaSlot)
                 .join(PaAppointment, PaFeedback.appointment_id == PaAppointment.id)
                 .join(PaSlot, PaAppointment.slot_id == PaSlot.id)
             )
-            if _to_int(data.advisor_id):
-                query = query.where(PaFeedback.advisor_id == int(data.advisor_id))
+            advisor_filter = scope_id or _to_int(data.advisor_id)
+            if advisor_filter:
+                query = query.where(PaFeedback.advisor_id == advisor_filter)
             if data.month.strip():
                 rng = _month_range(data.month)
                 if not rng:
@@ -2139,7 +2488,7 @@ def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResp
 
 
 def view_manage_mail_template_list(info: Info) -> ApiResponse:
-    """邮件模板列表（admin）：三类模板全量返回，缺失类型以内置默认补齐展示。"""
+    """邮件模板列表（仅 admin，模板为全局配置非顾问个人数据）：三类模板全量返回，缺失类型以内置默认补齐展示。"""
     if not _verify_admin(info):
         return _resp(401, "Token Error")
     maker = get_session()
@@ -2164,7 +2513,7 @@ def view_manage_mail_template_list(info: Info) -> ApiResponse:
 
 
 def view_manage_mail_template_update(info: Info, data: ManageMailTemplateUpdateInput) -> ApiResponse:
-    """邮件模板更新（admin）：按类型 upsert 主题与正文 HTML。"""
+    """邮件模板更新（仅 admin，模板为全局配置非顾问个人数据）：按类型 upsert 主题与正文 HTML。"""
     user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")

@@ -20,7 +20,7 @@ export interface LoginData {
   username: string;
 }
 
-/** 账号密码登录（admin/advisor；student 会被后端拒绝并返回 msg）
+/** 账号密码登录（仅 admin；student/advisor 会被后端拒绝并引导走 SSO）
  *  传输加密：用户名/密码先经后端 loginKey 公钥 RSA-OAEP(SHA-256) 加密，
  *  后端以内存私钥解密，明文不出现在网络载荷中。
  *  非 200 时抛出携带 data 的错误：触发验证码时含 need_captcha/captcha_id/image_base64。
@@ -58,7 +58,7 @@ export const loginApi = async (data: {
   throw err;
 };
 
-/** 管理员注册（/login 页入口）。
+/** 管理员注册（/admin-login 页入口）。
  *  邮箱即登录用户名（后端落库 pa_user.username = email）；
  *  注册成功后账号为未激活状态（is_active=false），
  *  须运维人员登库将 pa_user.is_active 置为 TRUE 后方可登录。
@@ -89,13 +89,13 @@ export const registerApi = async (data: {
  *  oauthToken 为后端保留的旧隐式流字段（已废弃），固定传空串；
  *  state 仅用于前端 CSRF 校验，不回传后端。
  */
-export const oauthLoginApi = async (code: string, state = "") => {
+export const oauthLoginApi = async (code: string, state = "", portal = "") => {
   return await callApi<LoginData>(
     "oauthLogin",
     `mutation OauthLogin($data: OauthInput!) {
       oauthLogin(data: $data) { code msg data }
     }`,
-    { data: { code, state } }
+    { data: { code, state, portal } }
   );
 };
 

@@ -17,15 +17,16 @@
 ## 1. 简介 (Introduction)
 
 - **Slogan**: 为高校朋辈辅导场景打造的排期与预约一站式平台 —— 管理端统一排期，学生一键预约，系统自动提醒。
-- **Description**: id_x_007 是运行于 **i-Core 可插拔内核**之上的业务插件模块，面向大学生事务办公室（UGO, University General Office）的朋辈顾问（Peer Consultant）咨询业务。系统打通「顾问建档 → 排期发布（单条新增 / Excel 批量导入）→ 学生浏览预约 → 每日定时提醒 → 取消 / 完成 / 反馈 → 运营统计导出」完整业务闭环。后端以 Litestar + Strawberry GraphQL 暴露单一 GraphQL 端点（`/b/id_x_007/graphql`），数据落 PostgreSQL `pa_*` 七张业务表；前端为 Next.js App Router + HeroUI 的中英双语站点（路由前缀 `/f/007`）；入口由 HAProxy 统一按路径分流。相比通用预约工具，本系统内建 CUHK ADFS 统一身份认证（OAuth2 授权码流）、数据库行级锁防超订、库表驱动的邮件模板体系与 advisory lock 防重的定时提醒调度器，可在多 worker 生产环境下直接部署。
+- **Description**: id_x_007 是运行于 **i-Core 可插拔内核**之上的业务插件模块，面向大学生事务办公室（UGO, University General Office）的朋辈顾问（Peer Consultant）咨询业务。系统打通「顾问建档 → 排期发布（单条新增 / Excel 批量导入）→ 学生浏览预约 → 每日定时提醒 → 取消 / 完成 / 反馈 → 运营统计导出」完整业务闭环。后端以 Litestar + Strawberry GraphQL 暴露单一 GraphQL 端点（`/b/id_x_007/graphql`），数据落 PostgreSQL `pa_*` 八张业务表；前端为 Next.js App Router + HeroUI 的中英双语站点（路由前缀 `/f/007`）；入口由 HAProxy 统一按路径分流。相比通用预约工具，本系统内建 CUHK ADFS 统一身份认证（OAuth2 授权码流）、数据库行级锁防超订、库表驱动的邮件模板体系与 advisory lock 防重的定时提醒调度器，可在多 worker 生产环境下直接部署。
 
 ## 2. 核心特性 (Features)
 
-- **顾问建档与排期管理**：管理员创建顾问档案（年级 / 专业 / 擅长方向 / 简介 / 照片），并在「排期管理」中代管各顾问的咨询时段：单条增删改、暂停 / 恢复、「暂不接待」整体开关，以及 Excel（.xlsx）批量导入排期（逐行校验、失败行报告、同时段 upsert）。
-- **学生浏览与预约**：按专业 / 方向筛选顾问卡片，查看未来可约时段；预约须在开始前 24 小时之前提交，取消（学生侧 / 管理端代顾问）须填写取消原因、在开始前 4 小时内禁止；时段占用（每时段 1 人）与重复预约经数据库行级锁（`SELECT ... FOR UPDATE`）校验，并发下不超订。
+- **顾问建档与排期管理**：管理员创建顾问档案（年级 / 专业 / 擅长方向 / 简介 / 照片）；顾问经 SSO 登录顾问门户自助管理本人咨询时段，管理员亦可在「排期管理」中代管：单条增删改、暂停 / 恢复、「暂不接待」整体开关，以及 Excel（.xlsx）批量导入排期（逐行校验、失败行报告、同时段 upsert）。
+- **学生浏览与预约**：按专业 / 方向筛选顾问卡片，查看未来可约时段；预约须在开始前 24 小时之前提交，取消（学生侧 / 顾问侧或管理端代顾问）须填写取消原因、在开始前 4 小时内禁止；时段占用（每时段 1 人）与重复预约经数据库行级锁（`SELECT ... FOR UPDATE`）校验，并发下不超订。
 - **三类邮件通知**：预约成功（booked）、取消（cancelled）、每日提醒（reminder）三类邮件经 `pa_mail_template` 库表模板渲染（管理员可在线配置文案，缺失回退内置默认），发送结果无论成败均落库 `pa_email_log` 登记；每日 21:00（Asia/Shanghai）调度器扫描次日预约发送提醒，以 PostgreSQL advisory lock 防多 worker 重复发送。
-- **双通道身份认证**：学生经 CUHK ADFS 统一身份认证（OAuth2 授权码流，id_token 服务端验签，首次登录自动建档为 student）；管理员账号密码登录采用 RSA-2048 传输加密 + 防爆破锁定（默认 5 次失败锁定 10 分钟）+ 连续失败后 SVG 图形验证码。顾问不设登录入口，其排期与预约处理全部由管理后台代管。
-- **运营统计与导出**：预约总量 / 完成 / 取消 / 进行中统计与各顾问咨询量排名；预约明细与反馈汇总支持按顾问 / 月份过滤的 Excel 导出（base64 下载）；认证 / 变更 / 导出等敏感操作写入 JSON Lines 审计日志（按天轮转）。
+- **双通道身份认证**：学生与朋辈顾问经 CUHK ADFS 统一身份认证（OAuth2 授权码流，id_token 服务端验签；登录账号命中管理员预建且启用中的顾问档案即为 advisor，否则建档为 student；经 `/admin-login` 的 Consultant SSO Login 登录须过 `pa_advisor_allow` 白名单（邮箱在名单中且 allow=TRUE），通过后以 advisor 角色进入管理后台（「权限管理」模块仅 admin 可见）；学生经 `/user-login` 登录不受白名单限制、按顾问档案定角色；白名单经管理后台「权限管理」页维护，支持增删改与勾选允许/禁止）
+- **管理后台数据域隔离**：advisor 角色在后台仅能查看 / 检索 / 修改 / 导入 / 导出本人的档案、排期、预约、反馈、统计与邮件日志（后端按本人顾问档案强制过滤，忽略入参 advisorId）；顾问新增 / 删除、邮件模板配置、权限管理（白名单）仅 admin；admin 可查看并操作所有顾问的数据；管理员账号密码登录采用 RSA-2048 传输加密 + 防爆破锁定（默认 5 次失败锁定 10 分钟）+ 连续失败后 SVG 图形验证码。顾问经顾问门户（`/f/007/advisor`）自助管理本人排期与预约，管理后台亦可代管。
+- **运营统计与导出**：预约总量 / 完成 / 取消 / 进行中统计与各顾问咨询量排名；预约明细与反馈汇总支持按顾问 / 月份过滤的 Excel 导出（base64 下载），顾问可导出本人历史预约数据；认证 / 变更 / 导出等敏感操作写入 JSON Lines 审计日志（按天轮转）。
 
 ## 3. 项目亮点 (Highlights)
 
@@ -62,7 +63,7 @@
 ```mermaid
 graph TD
     subgraph 客户端层
-        B[Browser 学生 / 管理员]
+        B[Browser 学生 / 顾问 / 管理员]
     end
 
     subgraph 网关层
@@ -70,7 +71,7 @@ graph TD
     end
 
     subgraph 前端层
-        W["Next.js Web :2000<br/>/f/007/user /f/007/admin"]
+        W["Next.js Web :2000<br/>/f/007/user /f/007/advisor /f/007/admin"]
     end
 
     subgraph 应用层["应用层（i-Core 宿主 :7000）"]
@@ -81,7 +82,7 @@ graph TD
     end
 
     subgraph 数据层
-        PG[("PostgreSQL<br/>pa_user / pa_advisor / pa_slot<br/>pa_appointment / pa_feedback<br/>pa_email_log / pa_mail_template")]
+        PG[("PostgreSQL<br/>pa_user / pa_advisor / pa_advisor_allow<br/>pa_slot / pa_appointment / pa_feedback<br/>pa_email_log / pa_mail_template")]
     end
 
     subgraph 外部依赖
@@ -169,7 +170,7 @@ id_x_007/
 │       ├── x_scheduler.py       # 定时调度：每日 21:00 次日预约提醒（advisory lock 防重）
 │       └── x_audit.py           # 用户行为审计日志（JSON Lines，按天轮转）
 ├── web/                         # 前端（Next.js App Router，端口 2000）
-│   ├── src/app/f/007/           # 页面路由：login / user/oauth2(SSO 回调) / user / admin
+│   ├── src/app/f/007/           # 页面路由：admin-login / user-login(仅 SSO) / login(旧路径重定向) / user/oauth2(SSO 回调) / user / advisor / admin
 │   ├── src/views/               # 页面视图组件（预约 / 排期 / 统计 / 邮件日志等）
 │   ├── src/api/                 # GraphQL 客户端封装（user / advisor / admin）
 │   ├── src/components/          # 布局与通用 UI 组件
@@ -199,7 +200,7 @@ id_x_007/
 - **鉴权**：登录后将返回的会话 Token 置入请求头 `Token: <TOKEN>`；无需鉴权的操作仅 `health`、`loginKey`、`login`、`register`、`oauthLogin`。
 - **响应约定**：业务操作统一返回 `ApiResponse { code, msg, data }`（`data` 为 JSON 字符串）；文件下载返回 `FileResponse { code, msg, fileName, fileBase64 }`。常见业务码：200 成功、400 参数错误、401 未登录 / 凭据错误、403 禁止（时段已订 / 截止 / 越权）、404 不存在、409 冲突、423 账号锁定、428 需要验证码、500 服务器错误。
 
-### 8.1 Query 汇总（15 个）
+### 8.1 Query 汇总（18 个）
 
 <p align="center">表 8-1 GraphQL Query 汇总</p>
 
@@ -210,41 +211,47 @@ id_x_007/
 | advisorList | 登录 | 顾问卡片列表（含每人未来可约时段 ≤ 5 条与专业 / 方向筛选项） |
 | advisorSlotList | 登录 | 指定顾问的全部可约时段 |
 | myAppointmentList | 登录 | 我的预约列表（分页，附可取消标记） |
-| advisorMySlotList | admin | 顾问排期列表（须传 advisorId 代管；含暂停时段） |
-| advisorSlotTemplate | admin | 批量排期模板下载（xlsx：日期 / 开始时间 / 结束时间） |
-| manageAdvisorList | admin | 顾问列表（keyword 匹配姓名 / 用户名 / 专业 / 方向） |
-| manageAppointmentList | admin | 全量预约明细（可按顾问 / 日期 / 状态筛选） |
-| manageFeedbackList | admin | 反馈列表（可按顾问 / 月份筛选） |
-| manageStats | admin | 运营统计：总量 / 完成 / 取消 / 进行中 + 顾问咨询量排名 |
-| manageEmailLogList | admin | 邮件发送日志（可按类型筛选） |
+| advisorMySlotList | admin / advisor | 顾问排期列表（advisor 本人；admin 代管须传 advisorId；含暂停时段） |
+| advisorSlotTemplate | admin / advisor | 批量排期模板下载（xlsx：日期 / 开始时间 / 结束时间） |
+| advisorAppointmentList | admin / advisor | 顾问预约明细（advisor 仅本人；admin 代管须传 advisorId；可按日期 / 状态筛选） |
+| advisorAppointmentExport | admin / advisor | 顾问个人历史预约导出（advisor 仅本人；可按月份过滤） |
+| manageAdvisorList | admin 全量 / advisor 仅本人 | 顾问列表（keyword 匹配姓名 / 用户名 / 专业 / 方向） |
+| manageAllowList | admin | 顾问 SSO 登录白名单列表（keyword 匹配邮箱） |
+| manageAppointmentList | admin 全量 / advisor 仅本人 | 预约明细（可按顾问 / 日期 / 状态筛选） |
+| manageFeedbackList | admin 全量 / advisor 仅本人 | 反馈列表（可按顾问 / 月份筛选） |
+| manageStats | admin 全量 / advisor 仅本人口径 | 运营统计：总量 / 完成 / 取消 / 进行中 + 顾问咨询量排名 |
+| manageEmailLogList | admin 全量 / advisor 仅本人预约关联 | 邮件发送日志（可按类型筛选） |
 | manageMailTemplateList | admin | 邮件模板列表（booked / cancelled / reminder 三类） |
-| manageAppointmentExport | admin | 全量预约导出（可按顾问 / 月份过滤） |
-| manageFeedbackExport | admin | 反馈汇总导出（可按顾问 / 月份过滤） |
+| manageAppointmentExport | admin 全量 / advisor 仅本人 | 预约导出（可按顾问 / 月份过滤） |
+| manageFeedbackExport | admin 全量 / advisor 仅本人 | 反馈汇总导出（可按顾问 / 月份过滤） |
 
-### 8.2 Mutation 汇总（19 个）
+### 8.2 Mutation 汇总（22 个）
 
 <p align="center">表 8-2 GraphQL Mutation 汇总</p>
 
 | 操作名 | 鉴权 | 说明 |
 |--------|------|------|
-| login | 无 | 账号密码登录（仅 admin；RSA 加密凭据 / 验证码 / 防爆破锁定） |
+| login | 无 | 账号密码登录（仅 admin，student/advisor 走 SSO；RSA 加密凭据 / 验证码 / 防爆破锁定） |
 | register | 无 | 管理员自助注册（注册后待运维登库激活） |
 | logout | 登录 | 登出（失效会话 Token） |
-| oauthLogin | 无 | CUHK SSO 登录（ADFS 授权码流；首次登录自动建档为 student） |
-| studentAppointmentCreate | 登录 | 学生预约（24h 截止 / 行锁占用校验 / 重复拦截 / 双方邮件通知） |
+| oauthLogin | 无 | CUHK SSO 登录（ADFS 授权码流；顾问入口须过 pa_advisor_allow 白名单、通过后签发 advisor 会话进入管理后台；学生入口不校验白名单、按顾问档案定 advisor/student；首次登录自动建档） |
+| studentAppointmentCreate | student | 学生预约（24h 截止 / 行锁占用校验 / 重复拦截 / 双方邮件通知） |
 | studentAppointmentCancel | 登录 | 学生取消预约（须填取消原因；开始前 4 小时内禁止；双方邮件通知） |
-| advisorSlotCreate | admin | 新增咨询时段（须传 advisorId 代管） |
-| advisorSlotUpdate | admin | 修改咨询时段（起止时间） |
-| advisorSlotDelete | admin | 删除咨询时段（存在预约记录时拒绝） |
-| advisorSlotState | admin | 暂停 / 恢复咨询时段 |
-| advisorSlotBatchUpload | admin | 批量上传排期（xlsx，逐行校验返回成功 / 失败行报告） |
-| advisorAcceptingSet | admin | 设置顾问「暂不接待」整体开关 |
-| advisorAppointmentCancel | admin | 代顾问取消预约（须填原因；开始前 4 小时内禁止） |
-| advisorAppointmentComplete | admin | 标记咨询完成（开始时间已过方可） |
-| feedbackSet | admin | 填写 / 更新咨询反馈（仅 completed 预约，upsert） |
+| advisorSlotCreate | admin / advisor | 新增咨询时段（advisor 本人；admin 代管须传 advisorId） |
+| advisorSlotUpdate | admin / advisor | 修改咨询时段（起止时间） |
+| advisorSlotDelete | admin / advisor | 删除咨询时段（存在预约记录时拒绝） |
+| advisorSlotState | admin / advisor | 暂停 / 恢复咨询时段 |
+| advisorSlotBatchUpload | admin / advisor | 批量上传排期（xlsx，逐行校验返回成功 / 失败行报告） |
+| advisorAcceptingSet | admin / advisor | 设置顾问「暂不接待」整体开关 |
+| advisorAppointmentCancel | admin / advisor | 顾问取消预约（须填原因；开始前 4 小时内禁止） |
+| advisorAppointmentComplete | admin / advisor | 标记咨询完成（开始时间已过方可） |
+| feedbackSet | admin / advisor | 填写 / 更新咨询反馈（仅 completed 预约，upsert） |
 | manageAdvisorCreate | admin | 创建顾问（仅建顾问档案，不建用户账号） |
-| manageAdvisorUpdate | admin | 更新顾问档案（留空字段不变） |
+| manageAdvisorUpdate | admin 任意 / advisor 仅本人 | 更新顾问档案（留空字段不变） |
 | manageAdvisorDelete | admin | 删除顾问（有预约记录时拒绝并提示停用） |
+| manageAllowCreate | admin | 新增白名单记录（邮箱唯一，不区分大小写） |
+| manageAllowUpdate | admin | 更新白名单记录（邮箱 / 允许状态，留空不变） |
+| manageAllowDelete | admin | 删除白名单记录（移除后该顾问邮箱无法 SSO 登录） |
 | manageMailTemplateUpdate | admin | 邮件模板更新（按类型 upsert 主题与正文） |
 
 ### 8.3 详细示例

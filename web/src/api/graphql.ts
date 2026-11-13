@@ -29,8 +29,8 @@ function handleSessionExpired(): void {
   localStorage.removeItem("user");
   // 避免在登录页重复跳转
   const path = window.location.pathname;
-  if (!path.startsWith("/f/007/login")) {
-    window.location.href = "/f/007/login";
+  if (!path.startsWith("/f/007/admin-login")) {
+    window.location.href = "/f/007/admin-login";
   }
 }
 

@@ -22,7 +22,7 @@ COMMENT ON COLUMN pa_user.id IS 'ID';
 COMMENT ON COLUMN pa_user.username IS '用户名（SSO 用户为 upn/邮箱）';
 COMMENT ON COLUMN pa_user.password IS '密码（PBKDF2 哈希，SSO 用户为 N/A）';
 COMMENT ON COLUMN pa_user."key" IS '会话密钥（Token）';
-COMMENT ON COLUMN pa_user.role IS '角色(student/admin)';
+COMMENT ON COLUMN pa_user.role IS '角色(student/advisor/admin)';
 COMMENT ON COLUMN pa_user.name IS '姓名';
 COMMENT ON COLUMN pa_user.email IS '邮箱';
 COMMENT ON COLUMN pa_user.state IS '状态(1启用/0停用)';
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS pa_advisor (
 );
 COMMENT ON TABLE pa_advisor IS '顾问档案表';
 COMMENT ON COLUMN pa_advisor.id IS 'ID';
-COMMENT ON COLUMN pa_advisor.username IS '账号标识（CUHK 邮箱/upn，仅用于标识，不提供登录）';
+COMMENT ON COLUMN pa_advisor.username IS '账号标识（CUHK 邮箱/upn，SSO 登录据此匹配顾问身份）';
 COMMENT ON COLUMN pa_advisor.name IS '姓名';
 COMMENT ON COLUMN pa_advisor.email IS '邮箱';
 COMMENT ON COLUMN pa_advisor.grade IS '年级';
@@ -60,6 +60,21 @@ COMMENT ON COLUMN pa_advisor.status IS '状态(1启用/0停用)';
 COMMENT ON COLUMN pa_advisor.accepting IS '接待状态(1接待/0暂不接待)';
 COMMENT ON COLUMN pa_advisor.create_time IS '创建时间';
 COMMENT ON COLUMN pa_advisor.update_time IS '更新时间';
+
+-- 顾问 SSO 登录白名单表（仅顾问受限，学生不校验）
+CREATE TABLE IF NOT EXISTS pa_advisor_allow (
+    id          SERIAL       PRIMARY KEY,
+    email       VARCHAR(255) NOT NULL UNIQUE,
+    allow       BOOLEAN      NOT NULL DEFAULT TRUE,
+    create_time TIMESTAMP    NULL DEFAULT NOW(),
+    update_time TIMESTAMP    NULL DEFAULT NOW()
+);
+COMMENT ON TABLE pa_advisor_allow IS '顾问 SSO 登录白名单表（仅顾问受限，学生不校验）';
+COMMENT ON COLUMN pa_advisor_allow.id IS 'ID';
+COMMENT ON COLUMN pa_advisor_allow.email IS '邮箱地址（匹配 SSO 声明的 email/upn，大小写不敏感）';
+COMMENT ON COLUMN pa_advisor_allow.allow IS '允许（FALSE 时等同不在白名单）';
+COMMENT ON COLUMN pa_advisor_allow.create_time IS '创建时间';
+COMMENT ON COLUMN pa_advisor_allow.update_time IS '更新时间';
 
 -- 咨询时段表
 CREATE TABLE IF NOT EXISTS pa_slot (

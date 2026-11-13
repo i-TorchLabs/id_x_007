@@ -28,7 +28,9 @@ export default {
   goRegister: "去注册",
   or: "或",
   ssoLogin: "香港中文大学统一认证登录",
-  ssoTip: "学生与请使用 CUHK 统一认证登录。",
+  advisorSsoLogin: "顾问统一认证登录（CUHK SSO）",
+  ssoTip: "学生与朋辈顾问请使用 CUHK 统一认证登录。",
+  advisorSsoTip: "朋辈顾问请使用 CUHK 统一认证登录（须在白名单内）；学生请前往学生登录页。",
   // 校验与提示
   validation: {
     required: "邮箱、姓名和密码为必填项",

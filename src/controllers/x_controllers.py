@@ -27,6 +27,10 @@ from x_models.id_x_007.src.schemas.x_schemas import (
     ManageAdvisorIdInput,
     ManageAdvisorListInput,
     ManageAdvisorUpdateInput,
+    ManageAllowCreateInput,
+    ManageAllowIdInput,
+    ManageAllowListInput,
+    ManageAllowUpdateInput,
     ManageAppointmentListInput,
     ManageEmailLogListInput,
     ManageExportInput,
@@ -67,8 +71,8 @@ class Query:
     def my_appointment_list(self, info: Info, data: PageInput) -> ApiResponse:
         return x_views.view_my_appointment_list(info, data)
 
-    # ----- 排期与预约（管理端代管） -----
-    @strawberry.field(description="排期列表（admin 代管，须指定 advisorId；含暂停时段）")
+    # ----- 排期与预约（advisor 本人 / admin 代管） -----
+    @strawberry.field(description="排期列表（advisor 本人或 admin 代管，admin 须指定 advisorId；含暂停时段）")
     def advisor_my_slot_list(self, info: Info, data: AdvisorPageInput) -> ApiResponse:
         return x_views.view_advisor_my_slot_list(info, data)
 
@@ -76,36 +80,48 @@ class Query:
     def advisor_slot_template(self, info: Info) -> FileResponse:
         return x_views.view_advisor_slot_template(info)
 
+    @strawberry.field(description="顾问预约明细（advisor 仅本人；admin 代管须指定 advisorId；可按日期/状态筛选）")
+    def advisor_appointment_list(self, info: Info, data: ManageAppointmentListInput) -> ApiResponse:
+        return x_views.view_advisor_appointment_list(info, data)
+
+    @strawberry.field(description="顾问个人历史预约导出（advisor 仅本人；admin 代管须指定 advisorId；可按月份过滤）")
+    def advisor_appointment_export(self, info: Info, data: ManageExportInput) -> FileResponse:
+        return x_views.view_advisor_appointment_export(info, data)
+
     # ----- 管理后台 -----
-    @strawberry.field(description="顾问列表（分页，keyword 匹配姓名/用户名/专业/方向，仅 admin）")
+    @strawberry.field(description="顾问列表（分页，keyword 匹配姓名/用户名/专业/方向；admin 全量 / advisor 仅本人档案）")
     def manage_advisor_list(self, info: Info, data: ManageAdvisorListInput) -> ApiResponse:
         return x_views.view_manage_advisor_list(info, data)
 
-    @strawberry.field(description="全量预约明细（可按顾问/日期/状态筛选，仅 admin）")
+    @strawberry.field(description="顾问 SSO 登录白名单列表（分页，keyword 匹配邮箱，仅 admin）")
+    def manage_allow_list(self, info: Info, data: ManageAllowListInput) -> ApiResponse:
+        return x_views.view_manage_allow_list(info, data)
+
+    @strawberry.field(description="预约明细（可按顾问/日期/状态筛选；admin 全量 / advisor 仅本人数据）")
     def manage_appointment_list(self, info: Info, data: ManageAppointmentListInput) -> ApiResponse:
         return x_views.view_manage_appointment_list(info, data)
 
-    @strawberry.field(description="反馈列表（可按顾问/月份筛选，仅 admin）")
+    @strawberry.field(description="反馈列表（可按顾问/月份筛选；admin 全量 / advisor 仅本人数据）")
     def manage_feedback_list(self, info: Info, data: ManageFeedbackListInput) -> ApiResponse:
         return x_views.view_manage_feedback_list(info, data)
 
-    @strawberry.field(description="运营统计：总量/完成/取消/进行中 + 各顾问咨询量排名（仅 admin）")
+    @strawberry.field(description="运营统计：总量/完成/取消/进行中 + 咨询量排名（admin 全量 / advisor 仅本人口径）")
     def manage_stats(self, info: Info) -> ApiResponse:
         return x_views.view_manage_stats(info)
 
-    @strawberry.field(description="邮件发送日志（可按类型筛选，仅 admin）")
+    @strawberry.field(description="邮件发送日志（可按类型筛选；admin 全量 / advisor 仅本人预约关联）")
     def manage_email_log_list(self, info: Info, data: ManageEmailLogListInput) -> ApiResponse:
         return x_views.view_manage_email_log_list(info, data)
 
-    @strawberry.field(description="邮件模板列表（admin；booked/cancelled/reminder 三类）")
+    @strawberry.field(description="邮件模板列表（仅 admin；booked/cancelled/reminder 三类）")
     def manage_mail_template_list(self, info: Info) -> ApiResponse:
         return x_views.view_manage_mail_template_list(info)
 
-    @strawberry.field(description="全量预约导出（可按顾问/月份过滤，仅 admin）")
+    @strawberry.field(description="预约导出（可按顾问/月份过滤；admin 全量 / advisor 仅本人数据）")
     def manage_appointment_export(self, info: Info, data: ManageExportInput) -> FileResponse:
         return x_views.view_manage_appointment_export(info, data)
 
-    @strawberry.field(description="反馈汇总导出（可按顾问/月份过滤，仅 admin）")
+    @strawberry.field(description="反馈汇总导出（可按顾问/月份过滤；admin 全量 / advisor 仅本人数据）")
     def manage_feedback_export(self, info: Info, data: ManageExportInput) -> FileResponse:
         return x_views.view_manage_feedback_export(info, data)
 
@@ -113,7 +129,7 @@ class Query:
 @strawberry.type
 class Mutation:
     # ----- 认证 -----
-    @strawberry.mutation(description="账号密码登录（仅 admin；RSA 加密凭据/验证码/防爆破锁定）")
+    @strawberry.mutation(description="账号密码登录（仅 admin，student/advisor 走 SSO；RSA 加密凭据/验证码/防爆破锁定）")
     def login(self, info: Info, data: LoginInput) -> ApiResponse:
         return x_views.view_login(info, data)
 
@@ -125,12 +141,12 @@ class Mutation:
     def logout(self, info: Info, data: LogoutInput) -> ApiResponse:
         return x_views.view_logout(info, data)
 
-    @strawberry.mutation(description="CUHK SSO 登录（ADFS 授权码流；首次登录自动建档为 student）")
+    @strawberry.mutation(description="CUHK SSO 登录（ADFS 授权码流；顾问入口（portal=advisor）须过 pa_advisor_allow 白名单、通过后签发 advisor 会话进入管理后台；学生入口不校验白名单、按顾问档案定 advisor/student；首次登录自动建档）")
     def oauth_login(self, info: Info, data: OauthInput) -> ApiResponse:
         return x_views.view_oauth_login(info, data)
 
     # ----- 学生端 · 预约 -----
-    @strawberry.mutation(description="学生预约（24h 截止/行锁占用校验/重复预约拦截/双方邮件通知）")
+    @strawberry.mutation(description="学生预约（仅 student；24h 截止/行锁占用校验/重复预约拦截/双方邮件通知）")
     def student_appointment_create(self, info: Info, data: AppointmentCreateInput) -> ApiResponse:
         return x_views.view_student_appointment_create(info, data)
 
@@ -138,41 +154,41 @@ class Mutation:
     def student_appointment_cancel(self, info: Info, data: AppointmentIdInput) -> ApiResponse:
         return x_views.view_student_appointment_cancel(info, data)
 
-    # ----- 排期管理（管理端代管） -----
-    @strawberry.mutation(description="新增咨询时段（admin 代管，须指定 advisorId）")
+    # ----- 排期管理（advisor 本人 / admin 代管） -----
+    @strawberry.mutation(description="新增咨询时段（advisor 本人或 admin 代管，admin 须指定 advisorId）")
     def advisor_slot_create(self, info: Info, data: SlotCreateInput) -> ApiResponse:
         return x_views.view_advisor_slot_create(info, data)
 
-    @strawberry.mutation(description="修改咨询时段（起止时间，admin 代管）")
+    @strawberry.mutation(description="修改咨询时段（起止时间，advisor 本人或 admin 代管）")
     def advisor_slot_update(self, info: Info, data: SlotUpdateInput) -> ApiResponse:
         return x_views.view_advisor_slot_update(info, data)
 
-    @strawberry.mutation(description="删除咨询时段（存在有效预约时拒绝，admin 代管）")
+    @strawberry.mutation(description="删除咨询时段（存在有效预约时拒绝，advisor 本人或 admin 代管）")
     def advisor_slot_delete(self, info: Info, data: SlotIdInput) -> ApiResponse:
         return x_views.view_advisor_slot_delete(info, data)
 
-    @strawberry.mutation(description="暂停/恢复咨询时段（admin 代管）")
+    @strawberry.mutation(description="暂停/恢复咨询时段（advisor 本人或 admin 代管）")
     def advisor_slot_state(self, info: Info, data: SlotStateInput) -> ApiResponse:
         return x_views.view_advisor_slot_state(info, data)
 
-    @strawberry.mutation(description="批量上传排期（xlsx，逐行校验并返回成功/失败行报告，admin 代管）")
+    @strawberry.mutation(description="批量上传排期（xlsx，逐行校验并返回成功/失败行报告，advisor 本人或 admin 代管）")
     def advisor_slot_batch_upload(self, info: Info, data: SlotBatchUploadInput) -> ApiResponse:
         return x_views.view_advisor_slot_batch_upload(info, data)
 
-    @strawberry.mutation(description="设置顾问「暂不接待」整体开关（admin 代管）")
+    @strawberry.mutation(description="设置顾问「暂不接待」整体开关（advisor 本人或 admin 代管）")
     def advisor_accepting_set(self, info: Info, data: AcceptingSetInput) -> ApiResponse:
         return x_views.view_advisor_accepting_set(info, data)
 
-    # ----- 预约处理与反馈（管理端代管） -----
-    @strawberry.mutation(description="管理端代顾问取消预约（须填原因；开始前 4 小时内禁止；双方邮件通知）")
+    # ----- 预约处理与反馈（advisor 本人 / admin 代管） -----
+    @strawberry.mutation(description="顾问取消预约（advisor 本人或 admin 代管；须填原因；开始前 4 小时内禁止；双方邮件通知）")
     def advisor_appointment_cancel(self, info: Info, data: AdvisorCancelInput) -> ApiResponse:
         return x_views.view_advisor_appointment_cancel(info, data)
 
-    @strawberry.mutation(description="标记咨询完成（开始时间已过方可标记，admin 代管）")
+    @strawberry.mutation(description="标记咨询完成（开始时间已过方可标记，advisor 本人或 admin 代管）")
     def advisor_appointment_complete(self, info: Info, data: AdvisorCompleteInput) -> ApiResponse:
         return x_views.view_advisor_appointment_complete(info, data)
 
-    @strawberry.mutation(description="填写/更新咨询反馈（仅 completed 预约，upsert，admin 代管）")
+    @strawberry.mutation(description="填写/更新咨询反馈（仅 completed 预约，upsert，advisor 本人或 admin 代管）")
     def feedback_set(self, info: Info, data: FeedbackSetInput) -> ApiResponse:
         return x_views.view_feedback_set(info, data)
 
@@ -181,7 +197,7 @@ class Mutation:
     def manage_advisor_create(self, info: Info, data: ManageAdvisorCreateInput) -> ApiResponse:
         return x_views.view_manage_advisor_create(info, data)
 
-    @strawberry.mutation(description="更新顾问档案（留空字段不变，仅 admin）")
+    @strawberry.mutation(description="更新顾问档案（留空字段不变；admin 任意 / advisor 仅本人档案）")
     def manage_advisor_update(self, info: Info, data: ManageAdvisorUpdateInput) -> ApiResponse:
         return x_views.view_manage_advisor_update(info, data)
 
@@ -189,7 +205,20 @@ class Mutation:
     def manage_advisor_delete(self, info: Info, data: ManageAdvisorIdInput) -> ApiResponse:
         return x_views.view_manage_advisor_delete(info, data)
 
-    @strawberry.mutation(description="邮件模板更新（admin；按类型 upsert 主题与正文）")
+    # ----- 管理后台 · 权限管理（顾问 SSO 登录白名单） -----
+    @strawberry.mutation(description="新增白名单记录（邮箱唯一，仅 admin）")
+    def manage_allow_create(self, info: Info, data: ManageAllowCreateInput) -> ApiResponse:
+        return x_views.view_manage_allow_create(info, data)
+
+    @strawberry.mutation(description="更新白名单记录（邮箱/允许状态，留空不变，仅 admin）")
+    def manage_allow_update(self, info: Info, data: ManageAllowUpdateInput) -> ApiResponse:
+        return x_views.view_manage_allow_update(info, data)
+
+    @strawberry.mutation(description="删除白名单记录（仅 admin）")
+    def manage_allow_delete(self, info: Info, data: ManageAllowIdInput) -> ApiResponse:
+        return x_views.view_manage_allow_delete(info, data)
+
+    @strawberry.mutation(description="邮件模板更新（仅 admin；按类型 upsert 主题与正文）")
     def manage_mail_template_update(self, info: Info, data: ManageMailTemplateUpdateInput) -> ApiResponse:
         return x_views.view_manage_mail_template_update(info, data)
 

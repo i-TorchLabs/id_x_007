@@ -14,8 +14,11 @@ import {
 import {
   advisorAppointmentCancelApi,
   advisorAppointmentCompleteApi,
+  advisorAppointmentExportApi,
+  advisorAppointmentListApi,
   feedbackSetApi,
 } from "@/api/advisor";
+import { useUserStore } from "@/context/UserContext";
 import Paginator from "@/components/pa/Paginator";
 import { AppointmentStateChip } from "@/components/pa/StateChip";
 import SelectField from "@/components/pa/SelectField";
@@ -36,9 +39,21 @@ function DetailRow({ label, value }: { label: string; value?: string }) {
   );
 }
 
-/** D-3 预约总览：顾问 / 日期 / 状态筛选 + 详情 + 导出 */
-export default function AppointmentManagementView() {
+/**
+ * 预约明细：日期 / 状态筛选 + 详情 + 取消 / 完成 / 反馈 + 导出
+ * - mode="admin"（D-3 预约总览）：全量数据，含顾问筛选与顾问列
+ * - mode="advisor"（C-2/C-3/C-4 顾问门户）：仅本人数据，走 advisor 系 API（advisorId 留空）
+ */
+export default function AppointmentManagementView({
+  mode = "admin",
+}: {
+  mode?: "admin" | "advisor";
+}) {
   const t = useTranslations("appointmentManagement");
+  const isAdmin = mode === "admin";
+  // 数据域：管理后台中 advisor 角色仅见本人数据（后端强制），不展示顾问筛选
+  const { state: userState } = useUserStore();
+  const canPickAdvisor = isAdmin && userState.role === "admin";
   const [loading, setLoading] = useState(false);
   const [advisors, setAdvisors] = useState<ManageAdvisor[]>([]);
   const [advisorId, setAdvisorId] = useState(ALL);
@@ -61,19 +76,23 @@ export default function AppointmentManagementView() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    // 顾问筛选项仅 admin 需要（advisor 门户/advisor 角色均固定本人数据域）
+    if (!canPickAdvisor) return;
     manageAdvisorListApi({ page: 1, pageSize: 100, keyword: "" })
       .then((res) => setAdvisors(res.list || []))
       .catch(() => undefined);
-  }, []);
+  }, [canPickAdvisor]);
 
   const getData = useCallback(
     async (pageNo = page, aid = advisorId, d = date, st = stateFilter) => {
       setLoading(true);
       try {
-        const res = await manageAppointmentListApi({
+        const listApi = isAdmin ? manageAppointmentListApi : advisorAppointmentListApi;
+        const res = await listApi({
           page: pageNo,
           pageSize: PAGE_SIZE,
-          advisorId: aid === ALL ? "" : aid,
+          // advisor 模式 advisorId 留空：后端绑定本人档案
+          advisorId: isAdmin && aid !== ALL ? aid : "",
           date: d,
           state: st === ALL ? "" : st,
         });
@@ -85,7 +104,7 @@ export default function AppointmentManagementView() {
       }
       setLoading(false);
     },
-    [page, advisorId, date, stateFilter]
+    [page, advisorId, date, stateFilter, isAdmin]
   );
 
   useEffect(() => {
@@ -107,8 +126,9 @@ export default function AppointmentManagementView() {
     setExporting(true);
     try {
       // 导出遵循当前顾问筛选；月份取自所选日期（契约导出维度为月）
-      const res = await manageAppointmentExportApi({
-        advisorId: advisorId === ALL ? "" : advisorId,
+      const exportApi = isAdmin ? manageAppointmentExportApi : advisorAppointmentExportApi;
+      const res = await exportApi({
+        advisorId: isAdmin && advisorId !== ALL ? advisorId : "",
         month: date ? dayjs(date).format("YYYY-MM") : "",
       });
       downloadBase64(res.fileName, res.fileBase64);
@@ -191,7 +211,8 @@ export default function AppointmentManagementView() {
 
   const columns = [
     { id: "applyNo", name: t("colApplyNo") },
-    { id: "advisorName", name: t("colAdvisor") },
+    // 顾问列仅管理端展示（advisor 模式恒为本人）
+    ...(isAdmin ? [{ id: "advisorName", name: t("colAdvisor") }] : []),
     { id: "student", name: t("colStudent") },
     { id: "time", name: t("colTime") },
     { id: "topic", name: t("colTopic") },
@@ -221,17 +242,19 @@ export default function AppointmentManagementView() {
     <div>
       <div className="bg-white p-5 mb-2 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-4 flex-wrap">
-          <SelectField
-            label={t("filterAdvisor")}
-            value={advisorId}
-            options={advisorOptions}
-            onChange={(v) => {
-              const next = v || ALL;
-              setAdvisorId(next);
-              handleSearch(next, date, stateFilter);
-            }}
-            className="w-56"
-          />
+          {canPickAdvisor && (
+            <SelectField
+              label={t("filterAdvisor")}
+              value={advisorId}
+              options={advisorOptions}
+              onChange={(v) => {
+                const next = v || ALL;
+                setAdvisorId(next);
+                handleSearch(next, date, stateFilter);
+              }}
+              className="w-56"
+            />
+          )}
           <TextField
             value={date}
             onChange={(v) => {
@@ -373,7 +396,9 @@ export default function AppointmentManagementView() {
               <Modal.Body>
                 <div className="flex flex-col gap-2">
                   <DetailRow label={t("detailApplyNo")} value={detailTarget?.applyNo} />
-                  <DetailRow label={t("detailAdvisor")} value={detailTarget?.advisorName} />
+                  {isAdmin && (
+                    <DetailRow label={t("detailAdvisor")} value={detailTarget?.advisorName} />
+                  )}
                   <DetailRow
                     label={t("detailStudent")}
                     value={`${detailTarget?.studentName ?? ""} ${detailTarget?.studentNo ?? ""}`}

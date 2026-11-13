@@ -11,6 +11,12 @@ import {
 /** sessionStorage 中暂存 CSRF state 的 key，回调页据此校验 */
 export const OAUTH_STATE_KEY = "id_x_007_adfs_oauth_state";
 
+/** sessionStorage 中暂存发起 SSO 的登录入口的 key（advisor=/admin-login 顾问按钮 / student=/user-login） */
+export const OAUTH_PORTAL_KEY = "id_x_007_adfs_oauth_portal";
+
+/** SSO 登录入口：决定后端白名单校验策略与失败后返回的登录页 */
+export type SsoPortal = "advisor" | "student";
+
 /** localStorage 中标记当前会话由 SSO 建立的 key；登出时据此决定是否一并登出 ADFS */
 export const SSO_LOGIN_FLAG = "id_x_007_sso_login";
 
@@ -23,11 +29,13 @@ const genState = (): string => {
 
 /**
  * 跳转到 ADFS 授权页（授权码授予流）。
+ * - portal 标记发起入口并暂存（sessionStorage），回调页回传后端：顾问入口
+ *   （advisor）强制白名单校验，学生入口（student）放行；
  * - 生成并暂存 state（sessionStorage），回调页校验防 CSRF；
  * - response_type=code，redirect_uri 必须与 ADFS 注册地址完全一致；
  * - client_id 未配置（默认空串）时提前报错并提示，避免跳到 ADFS 后才失败（MSIS9220）。
  */
-export const redirectToAdfsAuthorize = (): void => {
+export const redirectToAdfsAuthorize = (portal: SsoPortal): void => {
   if (!ADFS_CLIENT_ID) {
     console.error("ADFS_CLIENT_ID is not configured; cannot start SSO (set NEXT_PUBLIC_ADFS_CLIENT_ID).");
     toast.danger("SSO is not configured. Please contact the administrator.");
@@ -35,6 +43,7 @@ export const redirectToAdfsAuthorize = (): void => {
   }
   const state = genState();
   sessionStorage.setItem(OAUTH_STATE_KEY, state);
+  sessionStorage.setItem(OAUTH_PORTAL_KEY, portal);
   const params = new URLSearchParams({
     client_id: ADFS_CLIENT_ID,
     response_type: "code",

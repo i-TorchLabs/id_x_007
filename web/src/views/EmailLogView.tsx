@@ -10,6 +10,7 @@ import {
   type MailTemplate,
   type ManageEmailLog,
 } from "@/api/admin";
+import { useUserStore } from "@/context/UserContext";
 import Paginator from "@/components/pa/Paginator";
 import SelectField from "@/components/pa/SelectField";
 import FormField from "@/components/pa/FormField";
@@ -156,6 +157,9 @@ function MailTemplateModal({ open, onClose }: { open: boolean; onClose: () => vo
 /** D-6 邮件日志：按类型筛选查看发送结果；附邮件模板配置入口 */
 export default function EmailLogView() {
   const t = useTranslations("emailLog");
+  // 邮件模板为全局配置：入口仅 admin 可见（接口亦仅 admin 可调）
+  const { state: userState } = useUserStore();
+  const isAdminUser = userState.role === "admin";
   const [loading, setLoading] = useState(false);
   const [mailType, setMailType] = useState(ALL);
   const [page, setPage] = useState(1);
@@ -228,9 +232,11 @@ export default function EmailLogView() {
           options={mailTypeOptions}
           onChange={handleTypeChange}
         />
-        <Button variant="primary" onPress={() => setTemplateOpen(true)}>
-          {t("mailTemplates")}
-        </Button>
+        {isAdminUser && (
+          <Button variant="primary" onPress={() => setTemplateOpen(true)}>
+            {t("mailTemplates")}
+          </Button>
+        )}
       </div>
 
       <Table aria-label={t("tableLabel")}>

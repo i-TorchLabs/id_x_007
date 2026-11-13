@@ -14,11 +14,17 @@ export default {
   // 管理端菜单（AdminLayout）
   menuAdmin: {
     advisors: "顾问管理",
+    permissions: "权限管理",
     schedules: "时段管理",
     appointments: "预约管理",
     feedback: "反馈管理",
     stats: "数据统计",
     emailLogs: "邮件日志",
+  },
+  // 顾问端菜单（AdvisorLayout）
+  menuAdvisor: {
+    schedule: "我的排期",
+    appointments: "我的预约",
   },
   // 学生端菜单（UserLayout）
   menuUser: {

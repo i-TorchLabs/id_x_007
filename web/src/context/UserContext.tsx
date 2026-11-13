@@ -9,7 +9,7 @@ export interface UserState {
   username?: string;
   user_id: string;
   token: string; // Token
-  role: string; // student / admin
+  role: string; // student / advisor / admin
   name?: string;
 }
 
@@ -94,7 +94,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       redirectToAdfsLogout();
       return;
     }
-    router.push("/f/007/login");
+    router.push("/f/007/admin-login");
   }, [router, invalidateServerSession]);
 
   return (

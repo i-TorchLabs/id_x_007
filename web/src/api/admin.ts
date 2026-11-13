@@ -112,6 +112,83 @@ export const manageAdvisorDeleteApi = async (advisorId: string) => {
   );
 };
 
+// ===== 权限管理（顾问 SSO 登录白名单） =====
+
+/** allow 为 "1"/"0" */
+export interface ManageAllow {
+  allowId: string;
+  email: string;
+  allow: string;
+  createTime: string;
+  updateTime: string;
+}
+
+export interface ManageAllowListRes {
+  total: string;
+  list: ManageAllow[];
+}
+
+export const manageAllowListApi = async (data: {
+  page: number;
+  pageSize: number;
+  keyword?: string;
+}) => {
+  return await callApi<ManageAllowListRes>(
+    "manageAllowList",
+    `query ManageAllowList($data: ManageAllowListInput!) {
+      manageAllowList(data: $data) { code msg data }
+    }`,
+    {
+      data: {
+        page: data.page,
+        pageSize: data.pageSize,
+        keyword: data.keyword ?? "",
+      },
+    }
+  );
+};
+
+export const manageAllowCreateApi = async (data: { email: string; allow: boolean }) => {
+  return await callApi(
+    "manageAllowCreate",
+    `mutation ManageAllowCreate($data: ManageAllowCreateInput!) {
+      manageAllowCreate(data: $data) { code msg data }
+    }`,
+    { data: { email: data.email, allow: data.allow ? "1" : "0" } }
+  );
+};
+
+/** 更新白名单（email 空串表示不变；allow 传 "1"/"0"，空串表示不变） */
+export const manageAllowUpdateApi = async (data: {
+  allowId: string;
+  email?: string;
+  allow?: boolean;
+}) => {
+  return await callApi(
+    "manageAllowUpdate",
+    `mutation ManageAllowUpdate($data: ManageAllowUpdateInput!) {
+      manageAllowUpdate(data: $data) { code msg data }
+    }`,
+    {
+      data: {
+        allowId: Number(data.allowId) || 0,
+        email: data.email ?? "",
+        allow: data.allow === undefined ? "" : data.allow ? "1" : "0",
+      },
+    }
+  );
+};
+
+export const manageAllowDeleteApi = async (allowId: string) => {
+  return await callApi(
+    "manageAllowDelete",
+    `mutation ManageAllowDelete($data: ManageAllowIdInput!) {
+      manageAllowDelete(data: $data) { code msg data }
+    }`,
+    { data: { allowId: Number(allowId) || 0 } }
+  );
+};
+
 // ===== 预约总览 =====
 
 export interface ManageAppointment {

@@ -1,11 +1,13 @@
 """数据层：ORM 模型 + Base + 全局会话工厂（引擎启动时注入）。
 
 UGO 咨询预约系统（id_x_007），表前缀 pa_：
-- pa_user        用户账号（admin / student，student 仅可 SSO 登录）
-- pa_advisor     档案（独立建档不落 pa_user，含账号标识 / 邮箱 / 擅长方向 / 简介 / 照片）
+- pa_user        用户账号（admin / advisor / student，student/advisor 仅可 SSO 登录）
+- pa_advisor     档案（独立建档不落 pa_user，SSO 登录按账号标识匹配档案确定顾问身份，
+                 含账号标识 / 邮箱 / 擅长方向 / 简介 / 照片）
+- pa_advisor_allow 顾问 SSO 登录白名单（email + allow，仅校验顾问：不在名单或 allow=False 的顾问邮箱拒绝 SSO 登录，学生不受限）
 - pa_slot        咨询时段（管理端代管发布，每时段 1 人）
 - pa_appointment 预约记录（预约单号 A+8 位数字）
-- pa_feedback    咨询反馈（与预约一一对应，仅管理员可见）
+- pa_feedback    咨询反馈（与预约一一对应，仅管理员和顾问本人可见）
 - pa_email_log   邮件发送日志（booked / cancelled / reminder）
 - pa_mail_template 邮件模板（库表驱动，管理员可配置文案，缺失时代码内回退默认）
 - pa_sso_settings SSO 单点登录配置（取代 .env 的 PA_OAUTH_* 配置，取 id 最小行生效）
@@ -67,7 +69,7 @@ class PaUser(Base):
     username: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", unique=True, comment="用户名（SSO 用户为 upn/邮箱）")
     password: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="密码（PBKDF2 哈希，SSO 用户为 N/A）")
     key: Mapped[str] = mapped_column(Text, nullable=False, default="N/A", comment="会话密钥（Token）")
-    role: Mapped[str] = mapped_column(String(255), nullable=False, default="student", comment="角色(student/admin)")
+    role: Mapped[str] = mapped_column(String(255), nullable=False, default="student", comment="角色(student/advisor/admin)")
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="姓名")
     email: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="邮箱")
     state: Mapped[str] = mapped_column(String(255), nullable=False, default="1", comment="状态(1启用/0停用)")
@@ -82,7 +84,7 @@ class PaAdvisor(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
     username: Mapped[str] = mapped_column(
-        String(255), nullable=False, default="N/A", unique=True, comment="账号标识（CUHK 邮箱/upn，仅用于标识，不提供登录）"
+        String(255), nullable=False, default="N/A", unique=True, comment="账号标识（CUHK 邮箱/upn，SSO 登录据此匹配顾问身份）"
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="姓名")
     email: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="邮箱")
@@ -93,6 +95,17 @@ class PaAdvisor(Base):
     photo: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="照片（base64 data URL）")
     status: Mapped[str] = mapped_column(String(255), nullable=False, default="1", comment="状态(1启用/0停用)")
     accepting: Mapped[str] = mapped_column(String(255), nullable=False, default="1", comment="接待状态(1接待/0暂不接待)")
+    create_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="更新时间")
+
+
+class PaAdvisorAllow(Base):
+    __tablename__ = "pa_advisor_allow"
+    __table_args__ = {"comment": "顾问 SSO 登录白名单表（仅顾问受限，学生不校验）"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, comment="邮箱地址（匹配 SSO 声明的 email/upn，大小写不敏感）")
+    allow: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, comment="允许（False 时等同不在白名单）")
     create_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="创建时间")
     update_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="更新时间")
 

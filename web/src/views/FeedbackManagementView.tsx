@@ -10,6 +10,7 @@ import {
   type ManageAdvisor,
   type ManageFeedback,
 } from "@/api/admin";
+import { useUserStore } from "@/context/UserContext";
 import Paginator from "@/components/pa/Paginator";
 import SelectField from "@/components/pa/SelectField";
 import { downloadBase64 } from "@/utils/download";
@@ -21,6 +22,9 @@ const ALL = "__all__";
 /** D-4 咨询反馈：顾问 / 月份筛选 + 导出 */
 export default function FeedbackManagementView() {
   const t = useTranslations("feedback");
+  // 数据域：advisor 仅见本人反馈（后端强制），不展示顾问筛选
+  const { state: userState } = useUserStore();
+  const isAdminUser = userState.role === "admin";
   const [loading, setLoading] = useState(false);
   const [advisors, setAdvisors] = useState<ManageAdvisor[]>([]);
   const [advisorId, setAdvisorId] = useState(ALL);
@@ -31,10 +35,11 @@ export default function FeedbackManagementView() {
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
+    if (!isAdminUser) return;
     manageAdvisorListApi({ page: 1, pageSize: 100, keyword: "" })
       .then((res) => setAdvisors(res.list || []))
       .catch(() => undefined);
-  }, []);
+  }, [isAdminUser]);
 
   const getData = useCallback(
     async (pageNo = page, aid = advisorId, m = month) => {
@@ -109,17 +114,19 @@ export default function FeedbackManagementView() {
     <div>
       <div className="bg-white p-5 mb-2 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-4 flex-wrap">
-          <SelectField
-            label={t("filter.advisor")}
-            value={advisorId}
-            options={advisorOptions}
-            onChange={(v) => {
-              const next = v || ALL;
-              setAdvisorId(next);
-              handleSearch(next, month);
-            }}
-            className="w-56"
-          />
+          {isAdminUser && (
+            <SelectField
+              label={t("filter.advisor")}
+              value={advisorId}
+              options={advisorOptions}
+              onChange={(v) => {
+                const next = v || ALL;
+                setAdvisorId(next);
+                handleSearch(next, month);
+              }}
+              className="w-56"
+            />
+          )}
           <TextField
             value={month}
             onChange={(v) => {

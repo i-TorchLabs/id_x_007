@@ -11,6 +11,8 @@ interface AuthGuardProps {
   roles?: string[];
   /** 无需登录即可访问的路径（如 SSO 回调页），精确匹配 usePathname() */
   publicPaths?: string[];
+  /** 已登录但角色不符时的跳转目标（默认登录页）；用于嵌套守卫弹回上级页面而非登出 */
+  deniedRedirect?: string;
 }
 
 /**
@@ -19,7 +21,7 @@ interface AuthGuardProps {
  * - role/roles 指定时校验用户角色，防止学生 token 访问管理后台页面；
  * - 校验通过前不渲染 children，避免敏感页面内容被未授权用户看到。
  */
-export default function AuthGuard({ children, role, roles, publicPaths = [] }: AuthGuardProps) {
+export default function AuthGuard({ children, role, roles, publicPaths = [], deniedRedirect }: AuthGuardProps) {
   const router = useRouter();
   const [authorized, setAuthorized] = useState(false);
   const [checked, setChecked] = useState(false);
@@ -38,19 +40,19 @@ export default function AuthGuard({ children, role, roles, publicPaths = [] }: A
       userInfo = null;
     }
     if (!userInfo?.token) {
-      router.replace("/f/007/login");
+      router.replace("/f/007/admin-login");
       setChecked(true);
       return;
     }
     const allowed = roles ?? (role ? [role] : null);
     if (allowed && !allowed.includes(userInfo.role || "")) {
-      router.replace("/f/007/login");
+      router.replace(deniedRedirect || "/f/007/admin-login");
       setChecked(true);
       return;
     }
     setAuthorized(true);
     setChecked(true);
-  }, [router, role, roles, publicPaths]);
+  }, [router, role, roles, publicPaths, deniedRedirect]);
 
   // 校验完成前不渲染任何内容，防止敏感信息闪现
   if (!checked || !authorized) return null;

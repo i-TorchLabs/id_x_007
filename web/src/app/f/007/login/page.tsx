@@ -1,5 +1,6 @@
-import LoginView from "@/views/LoginView";
+import { redirect } from "next/navigation";
 
-export default function LoginPage() {
-  return <LoginView />;
+/** 旧登录路径兼容：ADFS 登出回跳等外部登记地址仍指向 /login 时平滑迁移 */
+export default function LegacyLoginPage() {
+  redirect("/f/007/admin-login");
 }

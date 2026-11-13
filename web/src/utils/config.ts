@@ -34,4 +34,4 @@ export const ADFS_RESOURCE = process.env.NEXT_PUBLIC_ADFS_RESOURCE || SITE_URL;
  */
 export const ADFS_POST_LOGOUT_REDIRECT_URI =
   process.env.NEXT_PUBLIC_ADFS_POST_LOGOUT_REDIRECT_URI ||
-  `${SITE_URL}/f/007/login`;
+  `${SITE_URL}/f/007/admin-login`;
