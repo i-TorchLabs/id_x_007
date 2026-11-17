@@ -223,7 +223,7 @@ export default function AppointmentManagementView({
 
   const advisorOptions = [
     { value: ALL, label: t("allAdvisors") },
-    ...advisors.map((a) => ({ value: String(a.advisorId), label: `${a.name} (${a.username})` })),
+    ...advisors.map((a) => ({ value: String(a.advisorId), label: `${a.name} (${a.email})` })),
   ];
 
   const stateOptions = [

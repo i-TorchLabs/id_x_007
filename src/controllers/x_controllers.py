@@ -89,7 +89,7 @@ class Query:
         return x_views.view_advisor_appointment_export(info, data)
 
     # ----- 管理后台 -----
-    @strawberry.field(description="顾问列表（分页，keyword 匹配姓名/用户名/专业/方向；admin 全量 / advisor 仅本人档案）")
+    @strawberry.field(description="顾问列表（分页，keyword 匹配姓名/邮箱/专业/方向；admin 全量 / advisor 仅本人档案）")
     def manage_advisor_list(self, info: Info, data: ManageAdvisorListInput) -> ApiResponse:
         return x_views.view_manage_advisor_list(info, data)
 
@@ -193,7 +193,7 @@ class Mutation:
         return x_views.view_feedback_set(info, data)
 
     # ----- 管理后台 · 顾问管理 -----
-    @strawberry.mutation(description="创建顾问（仅建顾问档案，不建用户账号，仅 admin）")
+    @strawberry.mutation(description="创建顾问（仅建顾问档案，邮箱即登录账号并默认加入 SSO 白名单，仅 admin）")
     def manage_advisor_create(self, info: Info, data: ManageAdvisorCreateInput) -> ApiResponse:
         return x_views.view_manage_advisor_create(info, data)
 

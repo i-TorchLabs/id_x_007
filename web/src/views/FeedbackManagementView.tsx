@@ -107,7 +107,7 @@ export default function FeedbackManagementView() {
 
   const advisorOptions = [
     { value: ALL, label: t("filter.allAdvisors") },
-    ...advisors.map((a) => ({ value: String(a.advisorId), label: `${a.name} (${a.username})` })),
+    ...advisors.map((a) => ({ value: String(a.advisorId), label: `${a.name} (${a.email})` })),
   ];
 
   return (

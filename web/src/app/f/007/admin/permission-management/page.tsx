@@ -1,11 +1,6 @@
-import AuthGuard from "@/components/AuthGuard";
-import PermissionManagementView from "@/views/PermissionManagementView";
+import { redirect } from "next/navigation";
 
+/** 权限管理已并入「顾问管理」页签（advisor-management），旧地址重定向保持兼容 */
 export default function PermissionManagementPage() {
-  return (
-    // 权限管理（白名单维护）仅 admin：advisor 直达 URL 时弹回后台首页
-    <AuthGuard roles={["admin"]} deniedRedirect="/f/007/admin/advisor-management">
-      <PermissionManagementView />
-    </AuthGuard>
-  );
+  redirect("/f/007/admin/advisor-management");
 }

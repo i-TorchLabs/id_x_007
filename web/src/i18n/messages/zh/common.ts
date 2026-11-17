@@ -14,7 +14,6 @@ export default {
   // 管理端菜单（AdminLayout）
   menuAdmin: {
     advisors: "顾问管理",
-    permissions: "权限管理",
     schedules: "时段管理",
     appointments: "预约管理",
     feedback: "反馈管理",

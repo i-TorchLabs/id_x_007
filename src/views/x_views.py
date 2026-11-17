@@ -6,7 +6,8 @@ UGO 咨询预约系统（pa 业务域），复刻插件化 GraphQL 架构：
 - Token 从 GraphQL 请求头 Header "Token" 读取；
 - 文件下载以 base64 返回（FileResponse）；
 - 登录链路：admin 用户名密码（RSA 传输加密 + 防爆破 + 验证码），
-  student/advisor 走 CUHK SSO（ADFS OAuth2 授权码流，advisor 按 pa_advisor.username 匹配档案）。
+  student/advisor 走 CUHK SSO（ADFS OAuth2 授权码流，advisor 按 upn/邮箱
+  忽略大小写匹配 pa_advisor.email 档案（邮箱即登录账号），与白名单口径一致）。
 """
 from __future__ import annotations
 
@@ -327,11 +328,40 @@ def _student_no_of(user: PaUser) -> str:
     return "N/A"
 
 
-def _own_advisor_profile(session, user: PaUser) -> PaAdvisor | None:
-    """按登录账号匹配本人启用中的顾问档案（pa_advisor.username == pa_user.username）。"""
+def _account_keys(*accounts: str) -> set[str]:
+    """候选账号归一化：去空白、转小写、剔除空值与 N/A 占位。"""
+    return {a.strip().lower() for a in accounts
+            if a and a.strip() and a.strip().lower() != "n/a"}
+
+
+def _match_advisor_profile(session, *accounts: str) -> PaAdvisor | None:
+    """按候选账号匹配启用中的顾问档案（忽略大小写）。
+
+    pa_advisor.email 即登录账号（唯一），与 SSO 白名单（pa_advisor_allow，
+    lower(email) 比对）口径对齐；候选账号同时传 upn 与邮箱，任一命中即可。
+    """
+    keys = _account_keys(*accounts)
+    if not keys:
+        return None
     return _first(session, select(PaAdvisor).where(
-        PaAdvisor.username == user.username, PaAdvisor.status == "1"
+        func.lower(PaAdvisor.email).in_(keys),
+        PaAdvisor.status == "1",
     ))
+
+
+def _advisor_allow_entry(session, *accounts: str) -> PaAdvisorAllow | None:
+    """按候选账号（upn/邮箱，忽略大小写）查顾问 SSO 登录白名单记录。"""
+    keys = _account_keys(*accounts)
+    if not keys:
+        return None
+    return _first(session, select(PaAdvisorAllow).where(
+        func.lower(PaAdvisorAllow.email).in_(keys)
+    ))
+
+
+def _own_advisor_profile(session, user: PaUser) -> PaAdvisor | None:
+    """按登录账号/邮箱匹配本人启用中的顾问档案（忽略大小写）。"""
+    return _match_advisor_profile(session, user.username, user.email)
 
 
 def _manage_scope_advisor_id(session, user: PaUser) -> tuple[int, str]:
@@ -343,7 +373,7 @@ def _manage_scope_advisor_id(session, user: PaUser) -> tuple[int, str]:
         return 0, ""
     advisor = _own_advisor_profile(session, user)
     if not advisor:
-        return -1, "顾问档案不存在或已停用"
+        return -1, "顾问档案不存在或已停用，请联系管理员在「顾问管理」中创建并启用与登录账号一致的档案"
     return advisor.id, ""
 
 
@@ -358,7 +388,7 @@ def _resolve_advisor_scope(session, user: PaUser, advisor_id: Any) -> tuple[PaAd
     if user.role == "advisor":
         advisor = _own_advisor_profile(session, user)
         if not advisor:
-            return None, "顾问档案不存在或已停用"
+            return None, "顾问档案不存在或已停用，请联系管理员在「顾问管理」中创建并启用与登录账号一致的档案"
         if aid and aid != advisor.id:
             return None, "无权操作其他顾问的数据"
         return advisor, ""
@@ -763,8 +793,9 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
        其余（学生走 /user-login）放行。SSO 邮箱（缺失时回退 upn）须在
        pa_advisor_allow 表中且 allow=True，否则拒绝登录并提示联系系统管理员；
     5. 按 username(=upn) 查 pa_user 并定角色：顾问入口（portal=advisor，已过
-       白名单）签发 advisor 会话，登录后进入管理后台 /admin/advisor-management
-       （后台对 advisor 开放，权限管理模块仅 admin）；学生入口按顾问档案有无定
+       白名单）签发 advisor 会话，登录后进入管理后台 /admin/schedule-management
+       （后台对 advisor 开放，顾问管理模块——含权限管理页签——仅 admin）；学生
+       入口按顾问档案有无定
        advisor/student；账密管理员账号一律拒绝 SSO（防 admin 角色被降级）；
        无档案则自动建档，老用户角色随本次入口/档案同步升降；
     6. 返回服务端签发的独立会话 token，不再暴露 IdP token。
@@ -833,21 +864,18 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                 logger.warning(f"{_rid()}OAuth upn 缺失，回退为 {upn}")
             name = str(identity.get("display_name") or "").strip() or "N/A"
 
-            # 顾问身份识别：upn 命中管理员预建且启用中的顾问档案即为 advisor
-            advisor_profile = _first(session, select(PaAdvisor).where(
-                PaAdvisor.username == upn, PaAdvisor.status == "1"
-            ))
+            # 顾问身份识别：upn/邮箱命中管理员预建且启用中的顾问档案即为
+            # advisor（忽略大小写，与白名单口径一致）
+            advisor_profile = _match_advisor_profile(session, upn, email)
 
             # 顾问 SSO 登录白名单校验：从顾问入口（/admin-login 的
             # Advisor SSO Login，portal=advisor）发起的登录一律校验；命中
             # 顾问档案的账号无论入口也校验（防伪造 portal 绕过）；其余
-            # （学生走 /user-login）放行。邮箱（缺失时回退 upn）须在
-            # pa_advisor_allow 中且 allow=True；不区分大小写。
+            # （学生走 /user-login）放行。SSO 邮箱或 upn 任一命中
+            # pa_advisor_allow 且 allow=True 即放行；不区分大小写。
             if data.portal == "advisor" or advisor_profile:
                 check_email = (email or upn).strip().lower()
-                allow_entry = _first(session, select(PaAdvisorAllow).where(
-                    func.lower(PaAdvisorAllow.email) == check_email
-                ))
+                allow_entry = _advisor_allow_entry(session, email, upn)
                 if not allow_entry or not allow_entry.allow:
                     logger.warning(f"{_rid()}顾问 SSO 登录被白名单拒绝: {check_email}")
                     audit("auth.sso_login", None, username=upn, info=info, result="fail",
@@ -870,8 +898,8 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                 return _resp(403, "管理员账号请使用账号密码登录")
 
             # 本次登录角色：顾问入口（Consultant SSO Login，已过白名单）签发
-            # advisor 会话，登录后进入管理后台（后台对 advisor 开放，权限管理
-            # 模块除外）；学生入口按顾问档案定 advisor/student
+            # advisor 会话，登录后进入管理后台（后台对 advisor 开放，顾问管理
+            # 模块——含权限管理页签——仅 admin）；学生入口按顾问档案定 advisor/student
             if data.portal == "advisor":
                 login_role = "advisor"
             else:
@@ -1883,14 +1911,16 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
         try:
             page, page_size = _clamp_page(data.page, data.page_size)
             query = select(PaAdvisor)
-            # 数据域：advisor 只能看到本人档案（admin 不限制）
+            # 数据域：advisor 只能看到本人档案（admin 不限制；忽略大小写
+            # 并兼容邮箱填法，与 SSO 档案匹配口径一致）
             if user.role == "advisor":
-                query = query.where(PaAdvisor.username == user.username)
+                own = _own_advisor_profile(session, user)
+                query = query.where(PaAdvisor.id == (own.id if own else -1))
             keyword = data.keyword.strip()
             if keyword:
                 query = query.where(or_(
                     PaAdvisor.name.contains(keyword),
-                    PaAdvisor.username.contains(keyword),
+                    PaAdvisor.email.contains(keyword),
                     PaAdvisor.major.contains(keyword),
                     PaAdvisor.direction.contains(keyword),
                 ))
@@ -1907,9 +1937,10 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
                 appointment_count = _count(session, select(PaAppointment).where(
                     PaAppointment.advisor_id == advisor.id
                 ))
+                # SSO 登录许可：邮箱命中白名单且 allow=True 为 "1"
+                allow_entry = _advisor_allow_entry(session, advisor.email)
                 detail.append({
                     "advisorId": advisor.id,
-                    "username": advisor.username,
                     "name": advisor.name,
                     "email": advisor.email,
                     "grade": advisor.grade,
@@ -1919,6 +1950,7 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
                     "photo": advisor.photo,
                     "status": advisor.status,
                     "accepting": advisor.accepting,
+                    "ssoAllow": "1" if allow_entry and allow_entry.allow else "0",
                     "slotCount": slot_count,
                     "appointmentCount": appointment_count,
                 })
@@ -1930,24 +1962,31 @@ def view_manage_advisor_list(info: Info, data: ManageAdvisorListInput) -> ApiRes
 
 
 def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> ApiResponse:
-    """创建顾问（仅 admin）：仅建 pa_advisor 档案（不落 pa_user；顾问经 CUHK SSO 登录后按账号匹配档案）。"""
+    """创建顾问（仅 admin）：仅建 pa_advisor 档案（不落 pa_user；顾问经 CUHK SSO
+    登录后按邮箱匹配档案）。邮箱即登录账号；创建时自动加入 SSO 登录白名单（allow=True）。"""
     user = _verify_admin(info)
     if not user:
         return _resp(401, "Token Error")
     maker = get_session()
     with maker() as session:
         try:
-            username = data.username.strip()
+            email = data.email.strip()
             name = data.name.strip()
-            if not username or not name:
-                return _resp(400, "用户名与姓名不能为空")
-            existing = _first(session, select(PaAdvisor.id).where(PaAdvisor.username == username))
+            if not email or not name:
+                return _resp(400, "邮箱与姓名不能为空")
+            # 邮箱即登录账号：必须是 SSO 可回填的邮箱形式，否则登录后
+            # 匹配不到档案，后台一律返回「顾问档案不存在」
+            if "@" not in email:
+                return _resp(400, "请填写顾问的 CUHK 邮箱（即 SSO 登录账号，如 name@cuhk.edu.cn）")
+            # 查重忽略大小写：防止同一 SSO 账号因大小写差异建出多份档案
+            existing = _first(session, select(PaAdvisor.id).where(
+                func.lower(PaAdvisor.email) == email.lower()
+            ))
             if existing:
-                return _resp(403, "该登录账号已存在顾问档案")
+                return _resp(403, "该邮箱已存在顾问档案")
             advisor = PaAdvisor(
-                username=username,
                 name=name,
-                email=data.email.strip() or "N/A",
+                email=email,
                 grade=data.grade.strip() or "N/A",
                 major=data.major.strip() or "N/A",
                 direction=data.direction.strip() or "N/A",
@@ -1957,10 +1996,17 @@ def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> Ap
                 accepting="1",
             )
             session.add(advisor)
+            # SSO 登录许可默认开启：邮箱写入白名单（已有记录则置 allow=True）
+            allow_entry = _advisor_allow_entry(session, email)
+            if allow_entry:
+                allow_entry.allow = True
+                allow_entry.update_time = datetime.now()
+            else:
+                session.add(PaAdvisorAllow(email=email, allow=True))
             session.commit()
-            logger.info(f"{_rid()}创建顾问：{username} {name}")
+            logger.info(f"{_rid()}创建顾问：{email} {name}（SSO 白名单 allow=True）")
             audit("advisor.create", user, info=info, target=f"advisor#{advisor.id}",
-                  detail=f"账号={username} 姓名={name}")
+                  detail=f"邮箱={email} 姓名={name} SSO许可=开")
             return _resp(200, "success", {"advisorId": advisor.id})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1969,7 +2015,8 @@ def view_manage_advisor_create(info: Info, data: ManageAdvisorCreateInput) -> Ap
 
 
 def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> ApiResponse:
-    """更新顾问档案（留空字段不变；status/accepting 同步控制）。"""
+    """更新顾问档案（留空字段不变；status/accepting 同步控制；
+    ssoAllow 联动白名单，仅 admin 生效）。"""
     user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1979,9 +2026,12 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
             advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == data.advisor_id))
             if not advisor:
                 return _resp(404, "顾问不存在")
-            # 数据域：advisor 只能修改本人档案
-            if user.role == "advisor" and advisor.username != user.username:
-                return _resp(403, "仅可修改本人档案")
+            # 数据域：advisor 只能修改本人启用中的档案（忽略大小写并兼容
+            # 邮箱填法；档案停用后不可自助改回，须 admin 重新启用）
+            if user.role == "advisor":
+                own = _own_advisor_profile(session, user)
+                if not own or own.id != advisor.id:
+                    return _resp(403, "仅可修改本人档案")
             now = datetime.now()
             if data.name.strip():
                 advisor.name = data.name.strip()
@@ -2002,9 +2052,22 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
             if data.accepting in ("1", "0"):
                 advisor.accepting = data.accepting
             advisor.update_time = now
+            # SSO 登录许可开关：联动 pa_advisor_allow 白名单（与权限管理页签
+            # 同一份数据）。仅 admin 可操作，防止 advisor 自助开白名单
+            sso_detail = ""
+            if data.sso_allow in ("1", "0") and user.role == "admin":
+                entry = _advisor_allow_entry(session, advisor.email)
+                if entry:
+                    entry.allow = data.sso_allow == "1"
+                    entry.update_time = now
+                elif data.sso_allow == "1":
+                    # 无记录时新建：以档案邮箱（即登录账号）为键
+                    session.add(PaAdvisorAllow(email=advisor.email, allow=True))
+                # 关闭且本无记录：视同已不在白名单，无需落库
+                sso_detail = f" SSO许可={'开' if data.sso_allow == '1' else '关'}"
             session.commit()
             audit("advisor.update", user, info=info, target=f"advisor#{advisor.id}",
-                  detail=f"姓名={advisor.name}")
+                  detail=f"姓名={advisor.name}{sso_detail}")
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")

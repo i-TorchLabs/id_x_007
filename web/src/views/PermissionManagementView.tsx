@@ -23,7 +23,7 @@ interface AllowForm {
 
 const emptyForm: AllowForm = { email: "", allow: true };
 
-/** 权限管理：顾问 SSO 登录白名单维护（仅 admin，入口见 AdminLayout / admin/layout.tsx AuthGuard） */
+/** 权限管理：顾问 SSO 登录白名单维护（仅 admin，作为顾问管理页的「权限管理」页签展示，守卫见 advisor-management/page.tsx） */
 export default function PermissionManagementView() {
   const t = useTranslations("permissionManagement");
   const [loading, setLoading] = useState(false);

@@ -1,15 +1,19 @@
 /** Consultant management page strings (advisorManagement namespace) */
 export default {
+  // Tabs (consultant profiles / permission whitelist)
+  tabs: {
+    advisors: "Consultants",
+    permissions: "Permission Management",
+  },
   // Search bar
   keyword: "Keyword",
-  keywordPlaceholder: "Name / username / major",
+  keywordPlaceholder: "Name / email / major",
   search: "Search",
   add: "Add",
   // Consultant list columns
   columns: {
-    username: "Username",
     name: "Name",
-    email: "Email",
+    email: "Email (login account)",
     grade: "Grade",
     major: "Major",
     direction: "Direction",
@@ -36,9 +40,8 @@ export default {
   editTitle: "Edit Consultant",
   addTitle: "Add Consultant",
   fields: {
-    username: "Username",
     name: "Name",
-    email: "Email",
+    email: "Email (login account)",
     grade: "Grade",
     major: "Major",
     direction: "Direction",
@@ -46,7 +49,9 @@ export default {
     photo: "Photo",
     enabled: "Enabled",
     accepting: "Accepting",
+    ssoAllow: "SSO Login Access",
   },
+  ssoAllowHint: "When on, the consultant's email is added to the SSO login allowlist (synced with the Permissions tab); when off, SSO login is blocked. Enabled by default for new consultants.",
   bioPlaceholder: "Consultant introduction",
   uploadPhoto: "Upload (max 3MB)",
   photoAlt: "Preview",
@@ -59,7 +64,8 @@ export default {
   loadFail: "Fail to load data.",
   photoTooLarge: "Photo must be smaller than 3MB.",
   photoReadFail: "Fail to read photo.",
-  usernameRequired: "Username is required.",
+  emailRequired: "Please enter the email (login account, CUHK SSO email).",
+  emailPlaceholder: "e.g. rayzha@cuhk.edu.cn (must match the consultant's SSO account)",
   nameRequired: "Name is required.",
   saved: "Saved successfully.",
   saveFail: "Fail to save.",

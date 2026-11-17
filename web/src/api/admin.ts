@@ -16,10 +16,9 @@ const toAdvisorId = (v?: string | number): number => Number(v) || 0;
 
 // ===== 顾问档案 =====
 
-/** status/accepting 为 "1"/"0" */
+/** status/accepting/ssoAllow 为 "1"/"0"（ssoAllow 联动白名单）；email 即登录账号 */
 export interface ManageAdvisor {
   advisorId: string;
-  username: string;
   name: string;
   email: string;
   grade: string;
@@ -29,6 +28,7 @@ export interface ManageAdvisor {
   photo: string;
   status: string;
   accepting: string;
+  ssoAllow: string;
   slotCount: string;
   appointmentCount: string;
 }
@@ -69,9 +69,8 @@ export interface ManageAdvisorFormValue {
   photo: string;
 }
 
-export const manageAdvisorCreateApi = async (
-  data: ManageAdvisorFormValue & { username: string }
-) => {
+/** 创建顾问（email 即登录账号，必填；后端自动把邮箱加入 SSO 白名单 allow=True） */
+export const manageAdvisorCreateApi = async (data: ManageAdvisorFormValue) => {
   return await callApi(
     "manageAdvisorCreate",
     `mutation ManageAdvisorCreate($data: ManageAdvisorCreateInput!) {
@@ -81,9 +80,14 @@ export const manageAdvisorCreateApi = async (
   );
 };
 
-/** 更新顾问（status/accepting 传 "1"/"0"，空串表示不变） */
+/** 更新顾问（status/accepting/ssoAllow 传 "1"/"0"，空串表示不变；ssoAllow 仅 admin 生效） */
 export const manageAdvisorUpdateApi = async (
-  data: ManageAdvisorFormValue & { advisorId: string; status: boolean; accepting: boolean }
+  data: ManageAdvisorFormValue & {
+    advisorId: string;
+    status: boolean;
+    accepting: boolean;
+    ssoAllow?: boolean;
+  }
 ) => {
   return await callApi(
     "manageAdvisorUpdate",
@@ -96,6 +100,7 @@ export const manageAdvisorUpdateApi = async (
         advisorId: toAdvisorId(data.advisorId),
         status: data.status ? "1" : "0",
         accepting: data.accepting ? "1" : "0",
+        ssoAllow: data.ssoAllow === undefined ? "" : data.ssoAllow ? "1" : "0",
       },
     }
   );

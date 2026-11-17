@@ -230,9 +230,8 @@ class ManageExportInput:
 
 @strawberry.input
 class ManageAdvisorCreateInput:
-    username: str = strawberry.field(description="用户名（CUHK SSO upn/邮箱，唯一）")
     name: str = strawberry.field(description="姓名")
-    email: str = strawberry.field(default="", description="邮箱")
+    email: str = strawberry.field(description="邮箱（即登录账号：CUHK SSO 邮箱，唯一）")
     grade: str = strawberry.field(default="", description="年级")
     major: str = strawberry.field(default="", description="专业")
     direction: str = strawberry.field(default="", description="擅长方向")
@@ -252,6 +251,9 @@ class ManageAdvisorUpdateInput:
     photo: str = strawberry.field(default="", description="照片（留空不变）")
     status: str = strawberry.field(default="", description="状态（1启用/0停用，留空不变）")
     accepting: str = strawberry.field(default="", description="接待状态（1接待/0暂不接待，留空不变）")
+    sso_allow: str = strawberry.field(
+        default="", description="SSO 登录许可（1允许/0禁止，留空不变；联动白名单，仅 admin 生效）"
+    )
 
 
 @strawberry.input

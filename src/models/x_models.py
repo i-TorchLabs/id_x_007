@@ -2,8 +2,8 @@
 
 UGO 咨询预约系统（id_x_007），表前缀 pa_：
 - pa_user        用户账号（admin / advisor / student，student/advisor 仅可 SSO 登录）
-- pa_advisor     档案（独立建档不落 pa_user，SSO 登录按账号标识匹配档案确定顾问身份，
-                 含账号标识 / 邮箱 / 擅长方向 / 简介 / 照片）
+- pa_advisor     档案（独立建档不落 pa_user，SSO 登录按邮箱匹配档案确定顾问身份，
+                 邮箱即登录账号（唯一），含擅长方向 / 简介 / 照片）
 - pa_advisor_allow 顾问 SSO 登录白名单（email + allow，仅校验顾问：不在名单或 allow=False 的顾问邮箱拒绝 SSO 登录，学生不受限）
 - pa_slot        咨询时段（管理端代管发布，每时段 1 人）
 - pa_appointment 预约记录（预约单号 A+8 位数字）
@@ -15,11 +15,14 @@ UGO 咨询预约系统（id_x_007），表前缀 pa_：
 """
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 
-from sqlalchemy import Boolean, Connection, DateTime, ForeignKey, Integer, String, Text, insert, select
+from sqlalchemy import Boolean, Connection, DateTime, ForeignKey, Integer, String, Text, insert, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -83,11 +86,11 @@ class PaAdvisor(Base):
     __table_args__ = {"comment": "档案表"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
-    username: Mapped[str] = mapped_column(
-        String(255), nullable=False, default="N/A", unique=True, comment="账号标识（CUHK 邮箱/upn，SSO 登录据此匹配顾问身份）"
-    )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="姓名")
-    email: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="邮箱")
+    email: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True,
+        comment="邮箱（同时是登录账号：SSO 登录按此匹配顾问身份，唯一）",
+    )
     grade: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="年级")
     major: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="专业")
     direction: Mapped[str] = mapped_column(String(255), nullable=False, default="N/A", comment="擅长方向")
@@ -236,6 +239,46 @@ class PaSmtpSettings(Base):
     mail_from: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="发件人地址（空则取 username）")
     create_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="创建时间")
     update_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="更新时间")
+
+
+def migrate_advisor_drop_username(conn: Connection) -> None:
+    """把 pa_advisor 收敛为「email 即登录账号」（幂等，可重复执行）。
+
+    历史表结构含 username 列（账号标识），与 email 并存；现已统一用 email
+    作为唯一登录账号，本迁移在建表后清理旧结构：
+    1. 旧库回填：email 为空 / 'N/A' 的行用 username 补齐（username 原本唯一，
+       回填不会产生重复）；
+    2. 删除 username 列（不存在则跳过）；
+    3. 补建 email 唯一索引（历史库没有；存在大小写重复邮箱时跳过并告警，
+       由应用层 lower(email) 查重兜底，不阻塞启动）。
+    """
+    has_username = conn.execute(text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() "
+        "  AND table_name = 'pa_advisor' AND column_name = 'username'"
+    )).first()
+    if not has_username:
+        return
+
+    conn.execute(text(
+        "UPDATE pa_advisor SET email = username "
+        "WHERE (email IS NULL OR email = '' OR email = 'N/A') "
+        "  AND username IS NOT NULL AND username NOT IN ('', 'N/A')"
+    ))
+    dup = conn.execute(text(
+        "SELECT lower(email), count(*) FROM pa_advisor "
+        "GROUP BY lower(email) HAVING count(*) > 1 LIMIT 5"
+    )).all()
+    conn.execute(text("ALTER TABLE pa_advisor DROP COLUMN username"))
+    if dup:
+        logger.warning(
+            "pa_advisor 存在大小写重复邮箱，跳过唯一索引创建，请人工合并："
+            f"{[d[0] for d in dup]}"
+        )
+        return
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS pa_advisor_email_key ON pa_advisor (lower(email))"
+    ))
 
 
 def seed_initial_admin(conn: Connection) -> None:

@@ -20,13 +20,13 @@ const PAGE_SIZE = 20;
 const PHOTO_MAX_BYTES = 3 * 1024 * 1024;
 
 interface AdvisorForm extends ManageAdvisorFormValue {
-  username: string;
   status: boolean;
   accepting: boolean;
+  ssoAllow: boolean;
 }
 
+// 新建默认 ssoAllow=true：后端创建档案时自动把邮箱写入 SSO 白名单（allow=True）
 const emptyForm: AdvisorForm = {
-  username: "",
   name: "",
   email: "",
   grade: "",
@@ -36,11 +36,13 @@ const emptyForm: AdvisorForm = {
   photo: "",
   status: true,
   accepting: true,
+  ssoAllow: true,
 };
 
 export default function AdvisorManagementView() {
   const t = useTranslations("advisorManagement");
-  // 数据域：advisor 仅见/仅可编辑本人档案（后端列表已过滤），不可新增与删除
+  // 页面入口仅 admin（见 advisor-management/page.tsx AuthGuard）；
+  // isAdminUser 判断保留为防御性兜底（后端对 advisor 亦仅放行本人档案）
   const { state: userState } = useUserStore();
   const isAdminUser = userState.role === "admin";
   const [loading, setLoading] = useState(false);
@@ -93,7 +95,6 @@ export default function AdvisorManagementView() {
       setIsEdit(true);
       setEditId(row.advisorId);
       setFormValue({
-        username: row.username,
         name: row.name || "",
         email: row.email || "",
         grade: row.grade || "",
@@ -103,6 +104,7 @@ export default function AdvisorManagementView() {
         photo: row.photo || "",
         status: isTrue(row.status),
         accepting: isTrue(row.accepting),
+        ssoAllow: isTrue(row.ssoAllow),
       });
     } else {
       setIsEdit(false);
@@ -127,8 +129,9 @@ export default function AdvisorManagementView() {
   };
 
   const handleSubmit = async () => {
-    if (!isEdit && !formValue.username.trim()) {
-      toast.danger(t("usernameRequired"));
+    // 邮箱即登录账号：新建必填且须为邮箱形式（SSO 按邮箱匹配档案）
+    if (!isEdit && !formValue.email.trim().includes("@")) {
+      toast.danger(t("emailRequired"));
       return;
     }
     if (!formValue.name.trim()) {
@@ -152,9 +155,11 @@ export default function AdvisorManagementView() {
           advisorId: editId,
           status: formValue.status,
           accepting: formValue.accepting,
+          // SSO 登录许可仅 admin 可操作（后端对非 admin 忽略该字段）
+          ...(isAdminUser ? { ssoAllow: formValue.ssoAllow } : {}),
         });
       } else {
-        await manageAdvisorCreateApi({ ...base, username: formValue.username.trim() });
+        await manageAdvisorCreateApi(base);
       }
       toast.success(t("saved"));
       setModalOpen(false);
@@ -180,7 +185,6 @@ export default function AdvisorManagementView() {
   const totalPages = Math.max(1, Math.ceil(itemCount / PAGE_SIZE));
 
   const columns = [
-    { id: "username", name: t("columns.username") },
     { id: "name", name: t("columns.name") },
     { id: "email", name: t("columns.email") },
     { id: "grade", name: t("columns.grade") },
@@ -301,19 +305,6 @@ export default function AdvisorManagementView() {
               </Modal.Header>
               <Modal.Body>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-                  {/* username 仅新建可填（登录账号，创建后不可改） */}
-                  {!isEdit && (
-                    <FieldRow label={t("fields.username")}>
-                      <TextField
-                        value={formValue.username}
-                        onChange={(v) => setFormValue((s) => ({ ...s, username: v }))}
-                        aria-label={t("fields.username")}
-                        className="w-full"
-                      >
-                        <Input />
-                      </TextField>
-                    </FieldRow>
-                  )}
                   <FieldRow label={t("fields.name")}>
                     <TextField
                       value={formValue.name}
@@ -324,6 +315,7 @@ export default function AdvisorManagementView() {
                       <Input />
                     </TextField>
                   </FieldRow>
+                  {/* 邮箱即登录账号（SSO 按邮箱匹配档案），新建必填 */}
                   <FieldRow label={t("fields.email")}>
                     <TextField
                       value={formValue.email}
@@ -331,7 +323,7 @@ export default function AdvisorManagementView() {
                       aria-label={t("fields.email")}
                       className="w-full"
                     >
-                      <Input />
+                      <Input placeholder={t("emailPlaceholder")} />
                     </TextField>
                   </FieldRow>
                   <FieldRow label={t("fields.grade")}>
@@ -411,17 +403,30 @@ export default function AdvisorManagementView() {
                   )}
                 </div>
                 {isEdit && (
-                  <div className="mt-4 flex items-center gap-8">
-                    <SwitchField
-                      label={t("fields.enabled")}
-                      checked={formValue.status}
-                      onChange={(v) => setFormValue((s) => ({ ...s, status: v }))}
-                    />
-                    <SwitchField
-                      label={t("fields.accepting")}
-                      checked={formValue.accepting}
-                      onChange={(v) => setFormValue((s) => ({ ...s, accepting: v }))}
-                    />
+                  <div className="mt-4">
+                    <div className="flex items-center gap-8">
+                      <SwitchField
+                        label={t("fields.enabled")}
+                        checked={formValue.status}
+                        onChange={(v) => setFormValue((s) => ({ ...s, status: v }))}
+                      />
+                      <SwitchField
+                        label={t("fields.accepting")}
+                        checked={formValue.accepting}
+                        onChange={(v) => setFormValue((s) => ({ ...s, accepting: v }))}
+                      />
+                      {/* SSO 登录许可：联动权限管理页签的白名单，仅 admin 可见可改 */}
+                      {isAdminUser && (
+                        <SwitchField
+                          label={t("fields.ssoAllow")}
+                          checked={formValue.ssoAllow}
+                          onChange={(v) => setFormValue((s) => ({ ...s, ssoAllow: v }))}
+                        />
+                      )}
+                    </div>
+                    {isAdminUser && (
+                      <p className="mt-2 text-xs text-gray-400">{t("ssoAllowHint")}</p>
+                    )}
                   </div>
                 )}
               </Modal.Body>

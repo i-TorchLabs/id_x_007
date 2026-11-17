@@ -14,7 +14,6 @@ export default {
   // Admin menu (AdminLayout)
   menuAdmin: {
     advisors: "Consultants",
-    permissions: "Permission Management",
     schedules: "Schedules",
     appointments: "Appointments",
     feedback: "Feedback",

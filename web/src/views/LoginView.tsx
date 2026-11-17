@@ -10,9 +10,10 @@ import { clearSsoLoginFlag, redirectToAdfsAuthorize } from "@/utils/sso";
 import LanguageToggle from "@/i18n/LanguageToggle";
 import PasswordInput from "@/components/pa/PasswordInput";
 
-/** 登录成功后按角色跳转（admin 与白名单顾问均进管理后台；权限管理模块仅 admin） */
+/** 登录成功后按角色跳转（admin 落地顾问管理；白名单顾问落地时段管理，顾问管理模块仅 admin） */
 export const routeByRole = (role: string): string => {
-  if (role === "admin" || role === "advisor") return "/f/007/admin/advisor-management";
+  if (role === "admin") return "/f/007/admin/advisor-management";
+  if (role === "advisor") return "/f/007/admin/schedule-management";
   return "/f/007/user/advisors";
 };
 

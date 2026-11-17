@@ -30,12 +30,11 @@ COMMENT ON COLUMN pa_user.is_active IS '是否已激活（自助注册的 admin 
 COMMENT ON COLUMN pa_user.create_time IS '创建时间';
 COMMENT ON COLUMN pa_user.update_time IS '更新时间';
 
--- 档案表
+-- 档案表（email 即登录账号：SSO 登录按邮箱匹配顾问身份）
 CREATE TABLE IF NOT EXISTS pa_advisor (
     id          SERIAL PRIMARY KEY,
-    username    VARCHAR(255) NOT NULL DEFAULT 'N/A' UNIQUE,
     name        VARCHAR(255) NOT NULL DEFAULT 'N/A',
-    email       VARCHAR(255) NOT NULL DEFAULT 'N/A',
+    email       VARCHAR(255) NOT NULL UNIQUE,
     grade       VARCHAR(255) NOT NULL DEFAULT 'N/A',
     major       VARCHAR(255) NOT NULL DEFAULT 'N/A',
     direction   VARCHAR(255) NOT NULL DEFAULT 'N/A',
@@ -46,11 +45,12 @@ CREATE TABLE IF NOT EXISTS pa_advisor (
     create_time TIMESTAMP    NULL DEFAULT NOW(),
     update_time TIMESTAMP    NULL DEFAULT NOW()
 );
+-- 忽略大小写唯一（与应用层 lower(email) 查重口径一致）
+CREATE UNIQUE INDEX IF NOT EXISTS pa_advisor_email_key ON pa_advisor (lower(email));
 COMMENT ON TABLE pa_advisor IS '顾问档案表';
 COMMENT ON COLUMN pa_advisor.id IS 'ID';
-COMMENT ON COLUMN pa_advisor.username IS '账号标识（CUHK 邮箱/upn，SSO 登录据此匹配顾问身份）';
 COMMENT ON COLUMN pa_advisor.name IS '姓名';
-COMMENT ON COLUMN pa_advisor.email IS '邮箱';
+COMMENT ON COLUMN pa_advisor.email IS '邮箱（同时是登录账号：SSO 登录据此匹配顾问身份，唯一）';
 COMMENT ON COLUMN pa_advisor.grade IS '年级';
 COMMENT ON COLUMN pa_advisor.major IS '专业';
 COMMENT ON COLUMN pa_advisor.direction IS '擅长方向';

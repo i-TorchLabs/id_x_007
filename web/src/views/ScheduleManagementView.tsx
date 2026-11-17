@@ -45,7 +45,7 @@ export default function ScheduleManagementView() {
             value={advisorId}
             options={advisors.map((a) => ({
               value: String(a.advisorId),
-              label: `${a.name} (${a.username})`,
+              label: `${a.name} (${a.email})`,
             }))}
             onChange={setAdvisorId}
             placeholder={t("advisorPlaceholder")}
