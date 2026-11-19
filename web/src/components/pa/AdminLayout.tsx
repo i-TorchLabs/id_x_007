@@ -26,7 +26,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     { label: t("stats"), key: "stats", icon: IoStatsChartOutline },
     { label: t("emailLogs"), key: "email-log", icon: IoMailOutline },
   ];
-  // 顾问管理（含「权限管理」白名单页签）仅 admin 可见；advisor 不展示该入口，
+  // 顾问管理仅 admin 可见；advisor 不展示该入口，
   // 页面本身亦有 admin 专属 AuthGuard 兜底
   if (state.role === "admin") {
     menuItems.unshift({

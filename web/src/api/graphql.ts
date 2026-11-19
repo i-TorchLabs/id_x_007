@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "@/utils/config";
+import { loginPathFor } from "@/utils/routes";
 
 /** 后端统一业务响应（data 为 JSON 字符串，需 JSON.parse 还原） */
 export interface ApiResponse<T = any> {
@@ -27,10 +28,10 @@ function handleSessionExpired(): void {
   localStorage.removeItem("userInfo");
   localStorage.removeItem("token");
   localStorage.removeItem("user");
-  // 避免在登录页重复跳转
-  const path = window.location.pathname;
-  if (!path.startsWith("/f/007/admin-login")) {
-    window.location.href = "/f/007/admin-login";
+  // 未登录状态按当前所在端选择登录页（学生端 / 后台），避免学生被带去管理员登录页
+  const target = loginPathFor(window.location.pathname);
+  if (window.location.pathname !== target) {
+    window.location.href = target;
   }
 }
 

@@ -415,7 +415,7 @@ export default function AdvisorManagementView() {
                         checked={formValue.accepting}
                         onChange={(v) => setFormValue((s) => ({ ...s, accepting: v }))}
                       />
-                      {/* SSO 登录许可：联动权限管理页签的白名单，仅 admin 可见可改 */}
+                      {/* SSO 登录许可：联动 pa_advisor_allow 白名单，仅 admin 可见可改 */}
                       {isAdminUser && (
                         <SwitchField
                           label={t("fields.ssoAllow")}

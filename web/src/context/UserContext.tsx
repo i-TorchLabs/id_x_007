@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useRouter } from "next/navigation";
 import { logoutApi } from "@/api/user";
 import { isSsoLogin, redirectToAdfsLogout } from "@/utils/sso";
+import { ADMIN_LOGIN, STUDENT_LOGIN } from "@/utils/routes";
 
 export interface UserState {
   username?: string;
@@ -11,6 +12,7 @@ export interface UserState {
   token: string; // Token
   role: string; // student / advisor / admin
   name?: string;
+  email?: string;
 }
 
 interface UserInfo {
@@ -19,6 +21,7 @@ interface UserInfo {
   role: string;
   token: string;
   name: string;
+  email: string;
 }
 
 interface UserContextValue {
@@ -38,6 +41,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     role: "",
     token: "",
     name: "",
+    email: "",
   });
 
   const saveUser = useCallback((userInfo: UserState) => {
@@ -49,6 +53,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         role: userInfo.role || "student",
         token: userInfo.token,
         name: userInfo.name || "",
+        // 旧会话 localStorage 无 email 时回退登录账号（admin 以邮箱注册、SSO 账号为 upn/邮箱）
+        email: userInfo.email || userInfo.username || "",
       });
       resolve(userInfo);
     });
@@ -86,6 +92,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
    */
   const logout = useCallback(() => {
     const ssoSession = isSsoLogin();
+    // 登出前记录角色：学生回学生登录页，其余回管理后台登录页
+    const role = state.role;
     invalidateServerSession();
     // localStorage.clear 已含 SSO 标记（SSO_LOGIN_FLAG）
     localStorage.clear();
@@ -94,8 +102,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
       redirectToAdfsLogout();
       return;
     }
-    router.push("/f/007/admin-login");
-  }, [router, invalidateServerSession]);
+    router.push(role === "student" ? STUDENT_LOGIN : ADMIN_LOGIN);
+  }, [router, invalidateServerSession, state.role]);
 
   return (
     <UserContext.Provider value={{ state, saveUser, isTokenExpire, logout }}>

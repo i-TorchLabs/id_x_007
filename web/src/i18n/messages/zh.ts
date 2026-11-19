@@ -9,7 +9,6 @@ import appointmentManagement from "./zh/appointmentManagement";
 import emailLog from "./zh/emailLog";
 import feedback from "./zh/feedback";
 import oauth from "./zh/oauth";
-import permissionManagement from "./zh/permissionManagement";
 
 /** 中文文案注册表（命名空间 = 视图） */
 export const zh = {
@@ -24,5 +23,4 @@ export const zh = {
   emailLog,
   feedback,
   oauth,
-  permissionManagement,
 };

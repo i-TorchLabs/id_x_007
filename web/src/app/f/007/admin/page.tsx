@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { routeByRole } from "@/views/LoginView";
+import { routeByRole } from "@/utils/routes";
 
 /** 后台首页：按角色落地默认模块（admin -> 顾问管理；advisor -> 时段管理） */
 export default function AdminPage() {

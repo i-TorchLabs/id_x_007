@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS pa_email_log (
 COMMENT ON TABLE pa_email_log IS '邮件发送日志表';
 COMMENT ON COLUMN pa_email_log.id IS 'ID';
 COMMENT ON COLUMN pa_email_log.mail_to IS '收件人';
-COMMENT ON COLUMN pa_email_log.mail_type IS '邮件类型(booked/cancelled/reminder)';
+COMMENT ON COLUMN pa_email_log.mail_type IS '邮件类型(booked_student预约成功确认/booked_advisor新预约通知/reminder次日提醒/cancelled取消通知)';
 COMMENT ON COLUMN pa_email_log.subject IS '主题';
 COMMENT ON COLUMN pa_email_log.content IS '正文';
 COMMENT ON COLUMN pa_email_log.status IS '状态(sent已发送/failed失败/skipped未配置跳过)';
@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS pa_mail_template (
 );
 COMMENT ON TABLE pa_mail_template IS '邮件模板表';
 COMMENT ON COLUMN pa_mail_template.id IS 'ID';
-COMMENT ON COLUMN pa_mail_template.mail_type IS '邮件类型(booked/cancelled/reminder)';
+COMMENT ON COLUMN pa_mail_template.mail_type IS '邮件类型(booked_student预约成功确认/booked_advisor新预约通知/reminder次日提醒/cancelled取消通知)';
 COMMENT ON COLUMN pa_mail_template.subject IS '主题模板（支持 {apply_no} 等占位符）';
 COMMENT ON COLUMN pa_mail_template.html IS '正文 HTML 模板（支持 {apply_no} 等占位符）';
 COMMENT ON COLUMN pa_mail_template.create_time IS '创建时间';

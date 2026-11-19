@@ -113,7 +113,7 @@ class Query:
     def manage_email_log_list(self, info: Info, data: ManageEmailLogListInput) -> ApiResponse:
         return x_views.view_manage_email_log_list(info, data)
 
-    @strawberry.field(description="邮件模板列表（仅 admin；booked/cancelled/reminder 三类）")
+    @strawberry.field(description="邮件模板列表（仅 admin；booked_student 预约成功确认/booked_advisor 新预约通知/reminder 次日提醒/cancelled 取消通知 四类）")
     def manage_mail_template_list(self, info: Info) -> ApiResponse:
         return x_views.view_manage_mail_template_list(info)
 
@@ -146,7 +146,7 @@ class Mutation:
         return x_views.view_oauth_login(info, data)
 
     # ----- 学生端 · 预约 -----
-    @strawberry.mutation(description="学生预约（仅 student；24h 截止/行锁占用校验/重复预约拦截/双方邮件通知）")
+    @strawberry.mutation(description="学生预约（任何已登录账号可为自己下单；24h 截止/行锁占用校验/重复预约拦截/双方邮件通知）")
     def student_appointment_create(self, info: Info, data: AppointmentCreateInput) -> ApiResponse:
         return x_views.view_student_appointment_create(info, data)
 

@@ -16,17 +16,18 @@ import SelectField from "@/components/pa/SelectField";
 import FormField from "@/components/pa/FormField";
 
 const PAGE_SIZE = 20;
-const ALL = "__all__";
 
 /** 模板可用占位符（后端渲染时替换） */
 const PLACEHOLDERS =
-  "{intro} {apply_no} {advisor_name} {student_name} {student_no} {start_time} {end_time} {topic} {mode} {extra}";
+  "{intro} {apply_no} {advisor_name} {student_email} {student_no} {start_time} {end_time} {topic} {mode} {extra}";
 
 const MailTypeChip = ({ mailType }: { mailType: string }) => {
   const t = useTranslations("emailLog");
   if (mailType === "cancelled") return <Chip color="danger">{t("type.cancelled")}</Chip>;
   if (mailType === "reminder") return <Chip color="warning">{t("type.reminder")}</Chip>;
-  return <Chip color="accent">{t("type.booked")}</Chip>;
+  if (mailType === "booked_advisor") return <Chip color="success">{t("type.bookedAdvisor")}</Chip>;
+  // booked_student（及旧版合并发送的 booked 历史日志）
+  return <Chip color="accent">{t("type.bookedStudent")}</Chip>;
 };
 
 const MailStatusChip = ({ status }: { status: string }) => {
@@ -36,21 +37,22 @@ const MailStatusChip = ({ status }: { status: string }) => {
   return <Chip>{t("status.skipped")}</Chip>;
 };
 
-/** 邮件模板编辑 Modal：下拉切换三类模板，编辑 subject + html */
+/** 邮件模板编辑 Modal：下拉切换四类模板（各触发时点见选项文案），编辑 subject + html */
 function MailTemplateModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useTranslations("emailLog");
   const [templates, setTemplates] = useState<Record<string, MailTemplate>>({});
-  const [current, setCurrent] = useState("booked");
+  const [current, setCurrent] = useState("booked_student");
   const [subject, setSubject] = useState("");
   const [html, setHtml] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  /** 三类模板的展示名 */
+  /** 四类模板的展示名（与触发时点/收件人一一对应） */
   const templateTypeOptions = [
-    { value: "booked", label: t("templateType.booked") },
-    { value: "cancelled", label: t("templateType.cancelled") },
+    { value: "booked_student", label: t("templateType.bookedStudent") },
+    { value: "booked_advisor", label: t("templateType.bookedAdvisor") },
     { value: "reminder", label: t("templateType.reminder") },
+    { value: "cancelled", label: t("templateType.cancelled") },
   ];
 
   // 切换模板类型时回填表单
@@ -70,7 +72,7 @@ function MailTemplateModal({ open, onClose }: { open: boolean; onClose: () => vo
           map[tpl.mailType] = tpl;
         });
         setTemplates(map);
-        applyTemplate("booked", map);
+        applyTemplate("booked_student", map);
       })
       .catch((error) => toast.danger((error as Error).message || t("toast.loadTemplatesFail")))
       .finally(() => setLoading(false));
@@ -116,7 +118,7 @@ function MailTemplateModal({ open, onClose }: { open: boolean; onClose: () => vo
                   label={t("modal.template")}
                   value={current}
                   options={templateTypeOptions}
-                  onChange={(v) => applyTemplate(v || "booked", templates)}
+                  onChange={(v) => applyTemplate(v || "booked_student", templates)}
                   className="w-64"
                 />
                 <FormField label={t("modal.subject")} value={subject} onChange={setSubject} />
@@ -161,17 +163,19 @@ export default function EmailLogView() {
   const { state: userState } = useUserStore();
   const isAdminUser = userState.role === "admin";
   const [loading, setLoading] = useState(false);
-  const [mailType, setMailType] = useState(ALL);
+  // 空串表示未筛选（全部类型）：下拉框仅呈现 4 种预约模板类型，占位文案承担「全部类型」
+  const [mailType, setMailType] = useState("");
   const [page, setPage] = useState(1);
   const [itemCount, setItemCount] = useState(0);
   const [data, setData] = useState<ManageEmailLog[]>([]);
   const [templateOpen, setTemplateOpen] = useState(false);
 
+  /** 四类预约邮件（与后端 mail_type 一一对应） */
   const mailTypeOptions = [
-    { value: ALL, label: t("filter.allTypes") },
-    { value: "booked", label: t("type.booked") },
-    { value: "cancelled", label: t("type.cancelled") },
+    { value: "booked_student", label: t("type.bookedStudent") },
+    { value: "booked_advisor", label: t("type.bookedAdvisor") },
     { value: "reminder", label: t("type.reminder") },
+    { value: "cancelled", label: t("type.cancelled") },
   ];
 
   const getData = useCallback(
@@ -181,7 +185,7 @@ export default function EmailLogView() {
         const res = await manageEmailLogListApi({
           page: pageNo,
           pageSize: PAGE_SIZE,
-          mailType: mt === ALL ? "" : mt,
+          mailType: mt,
         });
         setData(res.list || []);
         setItemCount(Number(res.total) || 0);
@@ -201,7 +205,8 @@ export default function EmailLogView() {
   }, []);
 
   const handleTypeChange = (v: string) => {
-    const next = v || ALL;
+    // 下拉仅含 4 类模板；清空选择即回到「全部类型」
+    const next = v ?? "";
     setMailType(next);
     setPage(1);
     getData(1, next);
@@ -226,12 +231,20 @@ export default function EmailLogView() {
   return (
     <div>
       <div className="bg-white p-5 mb-2 flex items-center justify-between flex-wrap gap-3">
-        <SelectField
-          label={t("filter.mailType")}
-          value={mailType}
-          options={mailTypeOptions}
-          onChange={handleTypeChange}
-        />
+        <div className="flex items-center gap-2">
+          <SelectField
+            label={t("filter.mailType")}
+            value={mailType}
+            options={mailTypeOptions}
+            onChange={handleTypeChange}
+            placeholder={t("filter.allTypes")}
+          />
+          {mailType && (
+            <Button variant="ghost" size="sm" onPress={() => handleTypeChange("")}>
+              {t("filter.reset")}
+            </Button>
+          )}
+        </div>
         {isAdminUser && (
           <Button variant="primary" onPress={() => setTemplateOpen(true)}>
             {t("mailTemplates")}

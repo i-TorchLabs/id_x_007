@@ -1,10 +1,5 @@
 /** 顾问管理页文案（advisorManagement 命名空间） */
 export default {
-  // 页签（顾问档案 / 权限管理白名单）
-  tabs: {
-    advisors: "顾问管理",
-    permissions: "权限管理",
-  },
   // 搜索栏
   keyword: "关键词",
   keywordPlaceholder: "姓名 / 邮箱 / 专业",
@@ -13,7 +8,7 @@ export default {
   // 顾问列表表头
   columns: {
     name: "姓名",
-    email: "邮箱（登录账号）",
+    email: "邮箱",
     grade: "年级",
     major: "专业",
     direction: "方向",
@@ -41,7 +36,7 @@ export default {
   addTitle: "新增顾问",
   fields: {
     name: "姓名",
-    email: "邮箱（登录账号）",
+    email: "邮箱",
     grade: "年级",
     major: "专业",
     direction: "方向",
@@ -51,7 +46,7 @@ export default {
     accepting: "接受预约",
     ssoAllow: "SSO 登录许可",
   },
-  ssoAllowHint: "开启后该顾问的邮箱加入 SSO 登录白名单（与「权限管理」页签数据同步），关闭则禁止其 SSO 登录；新建顾问默认开启。",
+  ssoAllowHint: "开启后该顾问的邮箱加入 SSO 登录白名单，关闭则禁止其 SSO 登录；新建顾问默认开启。",
   bioPlaceholder: "顾问简介",
   uploadPhoto: "上传（最大 3MB）",
   photoAlt: "预览",
@@ -65,7 +60,7 @@ export default {
   photoTooLarge: "照片大小不能超过 3MB。",
   photoReadFail: "照片读取失败。",
   emailRequired: "请填写邮箱（即登录账号，CUHK SSO 邮箱）。",
-  emailPlaceholder: "如 rayzha@cuhk.edu.cn（须与顾问 SSO 登录账号一致）",
+  emailPlaceholder: "",
   nameRequired: "请填写姓名。",
   saved: "保存成功。",
   saveFail: "保存失败。",

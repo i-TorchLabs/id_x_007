@@ -8,7 +8,7 @@ UGO 咨询预约系统（id_x_007），表前缀 pa_：
 - pa_slot        咨询时段（管理端代管发布，每时段 1 人）
 - pa_appointment 预约记录（预约单号 A+8 位数字）
 - pa_feedback    咨询反馈（与预约一一对应，仅管理员和顾问本人可见）
-- pa_email_log   邮件发送日志（booked / cancelled / reminder）
+- pa_email_log   邮件发送日志（booked_student / booked_advisor / reminder / cancelled）
 - pa_mail_template 邮件模板（库表驱动，管理员可配置文案，缺失时代码内回退默认）
 - pa_sso_settings SSO 单点登录配置（取代 .env 的 PA_OAUTH_* 配置，取 id 最小行生效）
 - pa_smtp_settings SMTP 邮件配置（取代 .env 的 PA_SMTP_* 配置，取 id 最小行生效）
@@ -179,7 +179,7 @@ class PaEmailLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
     mail_to: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="收件人")
-    mail_type: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="邮件类型(booked/cancelled/reminder)")
+    mail_type: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="邮件类型(booked_student预约成功确认/booked_advisor新预约通知/reminder次日提醒/cancelled取消通知)")
     subject: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="主题")
     content: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="正文")
     status: Mapped[str] = mapped_column(String(255), nullable=False, default="skipped", comment="状态(sent已发送/failed失败/skipped未配置跳过)")
@@ -193,7 +193,7 @@ class PaMailTemplate(Base):
     __table_args__ = {"comment": "邮件模板表"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
-    mail_type: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, comment="邮件类型(booked/cancelled/reminder)")
+    mail_type: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, comment="邮件类型(booked_student预约成功确认/booked_advisor新预约通知/reminder次日提醒/cancelled取消通知)")
     subject: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="主题模板（支持 {apply_no} 等占位符）")
     html: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="正文 HTML 模板（支持 {apply_no} 等占位符）")
     create_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now, comment="创建时间")
@@ -351,7 +351,7 @@ def seed_smtp_settings(conn: Connection) -> None:
             host="mail.cuhk.edu.cn",
             port=587,
             username="smeug@cuhk.edu.cn",
-            password="P@cuhksz2024!",
+            password="P@cuhksz2026!",
             mail_from="smeug@cuhk.edu.cn",
             create_time=datetime.now(),
             update_time=datetime.now(),
@@ -360,20 +360,31 @@ def seed_smtp_settings(conn: Connection) -> None:
 
 
 def seed_default_mail_templates(conn: Connection) -> None:
-    """播种默认邮件模板（幂等：逐类型查缺补插，已有记录不覆盖管理员的修改）。"""
+    """播种默认邮件模板（幂等：逐类型查缺补插，已有记录不覆盖管理员的修改）。
+
+    兼容迁移：历史版本的预约成功模板为单一 "booked"（双方同文案），现拆分为
+    booked_student / booked_advisor 两类；首次补插这两类时若存在旧 "booked"
+    记录，则沿用其正文 HTML（保留管理员自定义），主题取各自新默认。
+    """
     from x_models.id_x_007.src.utils.x_mail import DEFAULT_TEMPLATES
 
+    legacy_booked = conn.execute(
+        select(PaMailTemplate.html).where(PaMailTemplate.mail_type == "booked").limit(1)
+    ).first()
     for mail_type, tpl in DEFAULT_TEMPLATES.items():
         existing = conn.execute(
             select(PaMailTemplate.id).where(PaMailTemplate.mail_type == mail_type).limit(1)
         ).first()
         if existing:
             continue
+        html = tpl["html"]
+        if mail_type in ("booked_student", "booked_advisor") and legacy_booked:
+            html = legacy_booked[0] or html
         conn.execute(
             insert(PaMailTemplate).values(
                 mail_type=mail_type,
                 subject=tpl["subject"],
-                html=tpl["html"],
+                html=html,
                 create_time=datetime.now(),
                 update_time=datetime.now(),
             )

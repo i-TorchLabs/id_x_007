@@ -17,13 +17,3 @@ SELECT 'mail.cuhk.edu.cn',
        NOW(),
        NOW()
 WHERE NOT EXISTS (SELECT 1 FROM pa_smtp_settings);
-
--- 若表中已有（空白）配置行，用下方语句覆盖首行即可（无需重启服务）：
--- UPDATE pa_smtp_settings SET
---     host      = 'mail.cuhk.edu.cn',
---     port      = 587,
---     username  = 'smeug@cuhk.edu.cn',
---     password  = 'P@cuhksz2024!',
---     mail_from = 'smeug@cuhk.edu.cn',
---     update_time = NOW()
--- WHERE id = (SELECT MIN(id) FROM pa_smtp_settings);

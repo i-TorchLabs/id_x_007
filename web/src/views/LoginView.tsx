@@ -7,15 +7,12 @@ import { Button, InputGroup, TextField, toast } from "@heroui/react";
 import { loginApi, registerApi } from "@/api/user";
 import { useUserStore, type UserState } from "@/context/UserContext";
 import { clearSsoLoginFlag, redirectToAdfsAuthorize } from "@/utils/sso";
+import { STUDENT_LOGIN, routeByRole } from "@/utils/routes";
 import LanguageToggle from "@/i18n/LanguageToggle";
 import PasswordInput from "@/components/pa/PasswordInput";
 
 /** 登录成功后按角色跳转（admin 落地顾问管理；白名单顾问落地时段管理，顾问管理模块仅 admin） */
-export const routeByRole = (role: string): string => {
-  if (role === "admin") return "/f/007/admin/advisor-management";
-  if (role === "advisor") return "/f/007/admin/schedule-management";
-  return "/f/007/user/advisors";
-};
+export { routeByRole };
 
 /** 后端 428/登录失败时携带的验证码载荷 */
 interface CaptchaData {
@@ -280,7 +277,16 @@ export default function LoginView() {
                   <Button fullWidth variant="secondary" onPress={() => redirectToAdfsAuthorize("advisor")}>
                     {t("advisorSsoLogin")}
                   </Button>
-                  <div className="mt-2 text-xs text-gray-500 text-center">{t("advisorSsoTip")}</div>
+                  <div className="mt-2 text-xs text-gray-500 text-center">
+                    {t("advisorSsoTip")}{" "}
+                    <button
+                      type="button"
+                      className="text-[#5b2a86] hover:underline"
+                      onClick={() => router.push(STUDENT_LOGIN)}
+                    >
+                      {t("goStudentLogin")}
+                    </button>
+                  </div>
                 </>
               )}
             </div>

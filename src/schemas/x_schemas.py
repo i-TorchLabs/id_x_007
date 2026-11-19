@@ -219,7 +219,7 @@ class ManageFeedbackListInput:
 class ManageEmailLogListInput:
     page: int = strawberry.field(default=1, description="页码")
     page_size: int = strawberry.field(default=10, description="每页数量")
-    mail_type: str = strawberry.field(default="", description="邮件类型筛选（booked/cancelled/reminder）")
+    mail_type: str = strawberry.field(default="", description="邮件类型筛选（booked_student/booked_advisor/reminder/cancelled）")
 
 
 @strawberry.input
@@ -288,6 +288,6 @@ class ManageAllowIdInput:
 
 @strawberry.input
 class ManageMailTemplateUpdateInput:
-    mail_type: str = strawberry.field(description="邮件类型(booked/cancelled/reminder)")
+    mail_type: str = strawberry.field(description="邮件类型(booked_student/booked_advisor/reminder/cancelled)")
     subject: str = strawberry.field(description="主题模板（支持 {apply_no} 等占位符）")
     html: str = strawberry.field(description="正文 HTML 模板（支持 {apply_no} 等占位符）")

@@ -25,6 +25,7 @@ export default {
     schedule: "我的排期",
     appointments: "我的预约",
   },
+  // 学生端顶栏回后台入口（仅 advisor / admin 角色可见）
   // 学生端菜单（UserLayout）
   menuUser: {
     advisors: "顾问列表",

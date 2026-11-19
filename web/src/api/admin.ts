@@ -117,82 +117,8 @@ export const manageAdvisorDeleteApi = async (advisorId: string) => {
   );
 };
 
-// ===== 权限管理（顾问 SSO 登录白名单） =====
-
-/** allow 为 "1"/"0" */
-export interface ManageAllow {
-  allowId: string;
-  email: string;
-  allow: string;
-  createTime: string;
-  updateTime: string;
-}
-
-export interface ManageAllowListRes {
-  total: string;
-  list: ManageAllow[];
-}
-
-export const manageAllowListApi = async (data: {
-  page: number;
-  pageSize: number;
-  keyword?: string;
-}) => {
-  return await callApi<ManageAllowListRes>(
-    "manageAllowList",
-    `query ManageAllowList($data: ManageAllowListInput!) {
-      manageAllowList(data: $data) { code msg data }
-    }`,
-    {
-      data: {
-        page: data.page,
-        pageSize: data.pageSize,
-        keyword: data.keyword ?? "",
-      },
-    }
-  );
-};
-
-export const manageAllowCreateApi = async (data: { email: string; allow: boolean }) => {
-  return await callApi(
-    "manageAllowCreate",
-    `mutation ManageAllowCreate($data: ManageAllowCreateInput!) {
-      manageAllowCreate(data: $data) { code msg data }
-    }`,
-    { data: { email: data.email, allow: data.allow ? "1" : "0" } }
-  );
-};
-
-/** 更新白名单（email 空串表示不变；allow 传 "1"/"0"，空串表示不变） */
-export const manageAllowUpdateApi = async (data: {
-  allowId: string;
-  email?: string;
-  allow?: boolean;
-}) => {
-  return await callApi(
-    "manageAllowUpdate",
-    `mutation ManageAllowUpdate($data: ManageAllowUpdateInput!) {
-      manageAllowUpdate(data: $data) { code msg data }
-    }`,
-    {
-      data: {
-        allowId: Number(data.allowId) || 0,
-        email: data.email ?? "",
-        allow: data.allow === undefined ? "" : data.allow ? "1" : "0",
-      },
-    }
-  );
-};
-
-export const manageAllowDeleteApi = async (allowId: string) => {
-  return await callApi(
-    "manageAllowDelete",
-    `mutation ManageAllowDelete($data: ManageAllowIdInput!) {
-      manageAllowDelete(data: $data) { code msg data }
-    }`,
-    { data: { allowId: Number(allowId) || 0 } }
-  );
-};
+// 注：顾问 SSO 登录白名单（manageAllow*）后端接口保留；前端独立「权限管理」
+// 页签已移除，白名单经顾问编辑弹窗的「SSO 登录许可」开关（manageAdvisorUpdate）维护。
 
 // ===== 预约总览 =====
 
@@ -345,7 +271,7 @@ export const manageStatsApi = async () => {
 
 // ===== 邮件日志 =====
 
-/** mailType: booked / cancelled / reminder；status: sent / failed / skipped */
+/** mailType: booked_student / booked_advisor / reminder / cancelled；status: sent / failed / skipped */
 export interface ManageEmailLog {
   id: string;
   mailTo: string;
@@ -385,7 +311,7 @@ export const manageEmailLogListApi = async (data: {
 
 // ===== 邮件模板 =====
 
-/** 固定三类：booked / cancelled / reminder */
+/** 固定四类：booked_student / booked_advisor / reminder / cancelled */
 export interface MailTemplate {
   mailType: string;
   subject: string;

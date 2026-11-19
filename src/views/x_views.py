@@ -415,14 +415,16 @@ def _mode_label(mode: str) -> str:
     return "线上" if mode == "online" else "线下"
 
 
-def mail_context(appt: PaAppointment, slot: PaSlot, advisor_name: str,
+def mail_context(session, appt: PaAppointment, slot: PaSlot, advisor_name: str,
                  intro: str = "", extra: str = "") -> dict:
     """构造邮件模板渲染上下文（与 pa_mail_template 占位符一一对应）。"""
+    student = _first(session, select(PaUser).where(PaUser.id == appt.student_user_id))
     return {
         "intro": intro,
         "apply_no": appt.apply_no,
         "advisor_name": advisor_name,
-        "student_name": appt.student_name,
+        "student_name": appt.student_name,  # 兼容库表中仍用 {student_name} 的旧模板
+        "student_email": student.email if student else "",
         "student_no": appt.student_no,
         "start_time": _fmt_dt(slot.start_time),
         "end_time": _fmt_dt(slot.end_time),
@@ -432,21 +434,32 @@ def mail_context(appt: PaAppointment, slot: PaSlot, advisor_name: str,
     }
 
 
+def _notify_one(session, *, mail_type: str, mail_to: str, appt: PaAppointment,
+                slot: PaSlot, advisor_name: str, intro: str, extra: str = "") -> None:
+    """按指定模板类型给单个收件人发通知邮件（落 pa_email_log，失败不影响主流程）。
+
+    主题与正文经 pa_mail_template 渲染（管理员可配置），模板缺失回退内置默认。
+    """
+    if not mail_to or mail_to == "N/A":
+        return
+    subject, content = render_mail(
+        session, mail_type, mail_context(session, appt, slot, advisor_name, intro, extra)
+    )
+    send_mail(session, mail_to, mail_type, subject, content, appt.id)
+
+
 def _notify_both(session, *, mail_type: str, appt: PaAppointment, slot: PaSlot,
                  advisor_name: str, intro: str, extra: str = "",
                  student_user: PaUser | None = None,
                  advisor_email: str = "") -> None:
-    """给学生与顾问各发一封通知邮件（均落 pa_email_log，失败不影响主流程）。
-
-    主题与正文经 pa_mail_template 渲染（管理员可配置），模板缺失回退内置默认。
-    """
-    subject, content = render_mail(
-        session, mail_type, mail_context(appt, slot, advisor_name, intro, extra)
-    )
+    """给学生与顾问各发一封同类型通知邮件（用于取消等双方同文案场景）。"""
     if student_user:
-        send_mail(session, student_user.email, mail_type, subject, content, appt.id)
-    if advisor_email and advisor_email != "N/A":
-        send_mail(session, advisor_email, mail_type, subject, content, appt.id)
+        _notify_one(session, mail_type=mail_type, mail_to=student_user.email,
+                    appt=appt, slot=slot, advisor_name=advisor_name,
+                    intro=intro, extra=extra)
+    _notify_one(session, mail_type=mail_type, mail_to=advisor_email,
+                appt=appt, slot=slot, advisor_name=advisor_name,
+                intro=intro, extra=extra)
 
 
 def _style_header_row(ws, col_count: int) -> None:
@@ -704,6 +717,7 @@ def view_login(info: Info, data: LoginInput) -> ApiResponse:
                 "token": key,
                 "role": obj.role,
                 "name": obj.name,
+                "email": obj.email,
                 "username": obj.username,
             })
         except Exception as e:
@@ -794,7 +808,7 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
        pa_advisor_allow 表中且 allow=True，否则拒绝登录并提示联系系统管理员；
     5. 按 username(=upn) 查 pa_user 并定角色：顾问入口（portal=advisor，已过
        白名单）签发 advisor 会话，登录后进入管理后台 /admin/schedule-management
-       （后台对 advisor 开放，顾问管理模块——含权限管理页签——仅 admin）；学生
+       （后台对 advisor 开放，顾问管理模块仅 admin）；学生
        入口按顾问档案有无定
        advisor/student；账密管理员账号一律拒绝 SSO（防 admin 角色被降级）；
        无档案则自动建档，老用户角色随本次入口/档案同步升降；
@@ -899,7 +913,7 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
 
             # 本次登录角色：顾问入口（Consultant SSO Login，已过白名单）签发
             # advisor 会话，登录后进入管理后台（后台对 advisor 开放，顾问管理
-            # 模块——含权限管理页签——仅 admin）；学生入口按顾问档案定 advisor/student
+            # 模块仅 admin）；学生入口按顾问档案定 advisor/student
             if data.portal == "advisor":
                 login_role = "advisor"
             else:
@@ -946,6 +960,7 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
                 "token": session_key,
                 "role": role,
                 "name": obj.name,
+                "email": obj.email,
                 "username": obj.username,
             })
         except Exception as e:
@@ -1100,13 +1115,14 @@ def view_my_appointment_list(info: Info, data: PageInput) -> ApiResponse:
 
 
 def view_student_appointment_create(info: Info, data: AppointmentCreateInput) -> ApiResponse:
-    """学生预约（仅 student）：表单校验 + 24h 截止 + 行锁占用/重复校验 + 双方邮件通知。"""
+    """学生预约：表单校验 + 24h 截止 + 行锁占用/重复校验 + 双方邮件通知。
+
+    不限制下单账号角色：任何已登录用户均可为自己发起预约（admin / advisor 亦等同
+    学生身份下单），预约记录仍记在登录账号名下。
+    """
     user = _verify_token(info)
     if not user:
         return _resp(401, "Token Error")
-    if user.role != "student":
-        # 预约下单仅学生本人操作（admin/advisor 不代客预约）
-        return _resp(403, "仅学生可发起预约")
     # 表单校验（与前端联动规则一致）
     topic = (data.topic or "").strip()
     content = (data.content or "").strip()
@@ -1177,17 +1193,27 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
             logger.info(f"{_rid()}学生 {user.username} 预约顾问 {advisor.name}，单号 {apply_no}")
             audit("appointment.create", user, info=info, target=apply_no,
                   detail=f"顾问={advisor.name} 时段#{slot.id} 方式={mode}")
-            # 预约成功邮件（双方；失败仅落日志不影响预约结果）
+            # 预约成功邮件：学生发「预约成功确认」、顾问发「新预约通知」
+            # （booked_student / booked_advisor 两类模板独立可配；失败仅落日志不影响预约结果）
             student_user = _first(session, select(PaUser).where(PaUser.id == user.id))
-            _notify_both(
+            if student_user:
+                _notify_one(
+                    session,
+                    mail_type="booked_student",
+                    mail_to=student_user.email,
+                    appt=appt,
+                    slot=slot,
+                    advisor_name=advisor.name,
+                    intro="您的朋辈咨询预约已成功：",
+                )
+            _notify_one(
                 session,
-                mail_type="booked",
+                mail_type="booked_advisor",
+                mail_to=advisor.email,
                 appt=appt,
                 slot=slot,
                 advisor_name=advisor.name,
-                intro="您的朋辈咨询预约已成功：",
-                student_user=student_user,
-                advisor_email=advisor.email,
+                intro="您有一条新的学生预约：",
             )
             session.commit()
             return _resp(200, "预约成功", {"appointmentId": appt.id, "applyNo": apply_no})
@@ -2052,8 +2078,8 @@ def view_manage_advisor_update(info: Info, data: ManageAdvisorUpdateInput) -> Ap
             if data.accepting in ("1", "0"):
                 advisor.accepting = data.accepting
             advisor.update_time = now
-            # SSO 登录许可开关：联动 pa_advisor_allow 白名单（与权限管理页签
-            # 同一份数据）。仅 admin 可操作，防止 advisor 自助开白名单
+            # SSO 登录许可开关：联动 pa_advisor_allow 白名单。
+            # 仅 admin 可操作，防止 advisor 自助开白名单
             sso_detail = ""
             if data.sso_allow in ("1", "0") and user.role == "admin":
                 entry = _advisor_allow_entry(session, advisor.email)
@@ -2413,7 +2439,12 @@ def view_manage_email_log_list(info: Info, data: ManageEmailLogListInput) -> Api
                     select(PaAppointment.id).where(PaAppointment.advisor_id == scope_id)
                 ))
             if data.mail_type.strip():
-                query = query.where(PaEmailLog.mail_type == data.mail_type.strip())
+                mt = data.mail_type.strip()
+                # 兼容旧版日志：拆分前预约成功邮件统一记为 booked，归入「预约成功确认」
+                if mt == "booked_student":
+                    query = query.where(PaEmailLog.mail_type.in_(("booked_student", "booked")))
+                else:
+                    query = query.where(PaEmailLog.mail_type == mt)
             total = _count(session, query)
             objs = session.execute(
                 query.order_by(desc(PaEmailLog.id))
@@ -2551,7 +2582,7 @@ def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResp
 
 
 def view_manage_mail_template_list(info: Info) -> ApiResponse:
-    """邮件模板列表（仅 admin，模板为全局配置非顾问个人数据）：三类模板全量返回，缺失类型以内置默认补齐展示。"""
+    """邮件模板列表（仅 admin，模板为全局配置非顾问个人数据）：四类模板全量返回，缺失类型以内置默认补齐展示。"""
     if not _verify_admin(info):
         return _resp(401, "Token Error")
     maker = get_session()
@@ -2584,7 +2615,7 @@ def view_manage_mail_template_update(info: Info, data: ManageMailTemplateUpdateI
     subject = data.subject.strip()
     html = data.html.strip()
     if mail_type not in DEFAULT_TEMPLATES:
-        return _resp(400, "邮件类型不合法（booked/cancelled/reminder）")
+        return _resp(400, "邮件类型不合法（booked_student/booked_advisor/reminder/cancelled）")
     if not subject or not html:
         return _resp(400, "主题与正文均不能为空")
     maker = get_session()

@@ -54,7 +54,7 @@ def send_mail(session, mail_to: str, mail_type: str, subject: str, content: str,
               appointment_id: int | None = None) -> str:
     """发送邮件并写 pa_email_log（由调用方 commit），返回落库状态。
 
-    - mail_type：booked / cancelled / reminder；
+    - mail_type：booked_student / booked_advisor / reminder / cancelled；
     - 收件人为空或 SMTP 未配置：status="skipped"；
     - SMTP 异常：status="failed"，error 记录异常摘要。
     """
@@ -106,24 +106,30 @@ def send_mail(session, mail_to: str, mail_type: str, subject: str, content: str,
 
 
 # ===== 库表驱动的邮件模板（003 范式移植）=====
-# 占位符：{intro} 开场语、{apply_no} 预约单号、{advisor_name} 顾问、{student_name} 学生、
+# 占位符：{intro} 开场语、{apply_no} 预约单号、{advisor_name} 顾问、{student_email} 学生邮箱、
 # {student_no} 学号、{start_time}/{end_time} 起止时间、{topic} 主题、{mode} 方式、{extra} 附加段
 _DEFAULT_BODY = (
     "<p>{intro}</p>"
     "<p>预约单号：{apply_no}<br>"
     "顾问：{advisor_name}<br>"
-    "学生：{student_name}（{student_no}）<br>"
+    "学生：{student_email}（{student_no}）<br>"
     "时间：{start_time} ~ {end_time}<br>"
     "主题：{topic}<br>"
     "方式：{mode}</p>"
     "{extra}"
 )
 
-# 内置默认模板：pa_mail_template 缺失/渲染异常时的回退，亦用于建表后的幂等播种
+# 内置默认模板：pa_mail_template 缺失/渲染异常时的回退，亦用于建表后的幂等播种。
+# 四类模板与触发时点：
+# - booked_student 预约成功确认（发送给学生）：学生预约成功后；
+# - booked_advisor 新预约通知（发送给顾问）：学生预约成功后；
+# - reminder 预约前一天提醒（发送给双方）：预约开始前一天 21:00 调度触发；
+# - cancelled 学生取消预约（发送给双方）：学生页面取消预约时（顾问侧取消亦复用，intro 区分）。
 DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
-    "booked": {"subject": "【朋辈咨询】预约成功通知", "html": _DEFAULT_BODY},
-    "cancelled": {"subject": "【朋辈咨询】预约取消通知", "html": _DEFAULT_BODY},
+    "booked_student": {"subject": "【朋辈咨询】预约成功确认", "html": _DEFAULT_BODY},
+    "booked_advisor": {"subject": "【朋辈咨询】新预约通知", "html": _DEFAULT_BODY},
     "reminder": {"subject": "【朋辈咨询】明日咨询提醒", "html": _DEFAULT_BODY},
+    "cancelled": {"subject": "【朋辈咨询】预约取消通知", "html": _DEFAULT_BODY},
 }
 
 
@@ -143,7 +149,7 @@ def render_mail(session, mail_type: str, context: dict[str, Any]) -> tuple[str, 
 
     from x_models.id_x_007.src.models.x_models import PaMailTemplate
 
-    fallback = DEFAULT_TEMPLATES.get(mail_type) or DEFAULT_TEMPLATES["booked"]
+    fallback = DEFAULT_TEMPLATES.get(mail_type) or DEFAULT_TEMPLATES["booked_student"]
     subject_tpl, html_tpl = fallback["subject"], fallback["html"]
     try:
         tpl = session.execute(

@@ -3,16 +3,21 @@ export default {
   filter: {
     mailType: "Mail Type",
     allTypes: "All Types",
+    reset: "Reset",
   },
+  // Mail log type chips (maps to backend mail_type)
   type: {
-    booked: "Booked",
-    cancelled: "Cancelled",
-    reminder: "Reminder",
+    bookedStudent: "Booking Confirmed",
+    bookedAdvisor: "New Booking",
+    reminder: "Day-before Reminder",
+    cancelled: "Student Cancelled",
   },
+  // Template dropdown labels (trigger timing in parentheses)
   templateType: {
-    booked: "Booking Confirmation",
-    cancelled: "Cancellation Notice",
-    reminder: "Daily Reminder",
+    bookedStudent: "Booking Confirmed (to student, on booking)",
+    bookedAdvisor: "New Booking (to consultant, on booking)",
+    reminder: "Day-before Reminder (21:00 the day before, both)",
+    cancelled: "Student Cancelled (on cancellation, both)",
   },
   status: {
     sent: "Sent",

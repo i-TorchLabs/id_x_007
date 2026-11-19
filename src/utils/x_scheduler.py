@@ -1,4 +1,8 @@
-"""定时调度：每天 21:00（Asia/Shanghai）扫描次日预约并发送提醒邮件。
+"""定时调度：每天 21:00（Asia/Shanghai）扫描次日预约并发送「预约前一天提醒」邮件。
+
+对应四类预约模板中的第 3 类（reminder）：触发时点为预约开始前一天 21:00，
+收件人为学生与顾问双方；其余三类（booked_student / booked_advisor / cancelled）
+在预约、取消动作中即时发送，不经过本调度器。
 
 实现要点：
 - asyncio 后台任务：计算到下一个 21:00 的秒数后 sleep，到点执行再循环；
@@ -94,7 +98,8 @@ def _send_tomorrow_reminders() -> None:
                     "intro": "您有一条明日的朋辈咨询预约，请准时参加：",
                     "apply_no": appt.apply_no,
                     "advisor_name": advisor_name,
-                    "student_name": appt.student_name,
+                    "student_name": appt.student_name,  # 兼容库表中仍用 {student_name} 的旧模板
+                    "student_email": student.email if student else "",
                     "student_no": appt.student_no,
                     "start_time": _fmt(slot.start_time),
                     "end_time": _fmt(slot.end_time),

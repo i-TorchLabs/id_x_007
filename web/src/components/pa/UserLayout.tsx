@@ -52,7 +52,7 @@ export default function UserLayout({ children, title }: UserLayoutProps) {
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-white text-sm">{title ?? state.name ?? ""}</span>
+          <span className="text-white text-sm">{title ?? state.email ?? ""}</span>
           <LanguageToggle variant="solid" />
           <AlertDialog isOpen={logoutOpen} onOpenChange={setLogoutOpen}>
             <AlertDialog.Trigger>

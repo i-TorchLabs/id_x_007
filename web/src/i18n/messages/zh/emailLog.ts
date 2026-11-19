@@ -3,16 +3,21 @@ export default {
   filter: {
     mailType: "邮件类型",
     allTypes: "全部类型",
+    reset: "重置",
   },
+  // 邮件日志类型标签（与后端 mail_type 对应）
   type: {
-    booked: "预约成功",
-    cancelled: "已取消",
-    reminder: "提醒",
+    bookedStudent: "预约成功确认（学生）",
+    bookedAdvisor: "预约成功确认（顾问）",
+    reminder: "预约提醒（双方）",
+    cancelled: "取消预约（双方）",
   },
+  // 模板下拉展示名（括号内为触发时点）
   templateType: {
-    booked: "预约确认",
-    cancelled: "取消通知",
-    reminder: "每日提醒",
+    bookedStudent: "预约成功确认（学生）",
+    bookedAdvisor: "预约成功确认（顾问）",
+    reminder: "预约提醒（双方）",
+    cancelled: "取消预约（双方）",
   },
   status: {
     sent: "已发送",

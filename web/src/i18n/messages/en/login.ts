@@ -31,6 +31,7 @@ export default {
   advisorSsoLogin: "Consultant SSO Login",
   ssoTip: "Students and consultants please sign in with CUHK SSO.",
   advisorSsoTip: "Consultants please sign in with CUHK SSO (allowlisted accounts only); students please use the student login page.",
+  goStudentLogin: "Go to student login",
   // Validation & toasts
   validation: {
     required: "Email, name and password are required",

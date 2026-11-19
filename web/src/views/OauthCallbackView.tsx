@@ -7,10 +7,12 @@ import { AlertDialog, Button, Spinner } from "@heroui/react";
 import { oauthLoginApi } from "@/api/user";
 import { useUserStore, type UserState } from "@/context/UserContext";
 import { OAUTH_PORTAL_KEY, OAUTH_STATE_KEY, setSsoLoginFlag } from "@/utils/sso";
-import { routeByRole } from "@/views/LoginView";
+import { ADMIN_LOGIN, STUDENT_HOME, STUDENT_LOGIN, routeByRole } from "@/utils/routes";
 
 /**
- * ADFS SSO 回调页：校验 state 防 CSRF -> 以授权码换取本系统会话 -> 按角色跳转。
+ * ADFS SSO 回调页：校验 state 防 CSRF -> 以授权码换取本系统会话 -> 按入口跳转：
+ * 学生入口（/user-login，portal=student）一律落地学生预约页（即使账号命中
+ * 顾问档案被定为 advisor，也不进管理后台）；顾问入口（/admin-login）按角色进后台。
  * 仅客户端解析 window.location.search，避免 useSearchParams 需 Suspense 包裹。
  */
 export default function OauthCallbackView() {
@@ -53,7 +55,8 @@ export default function OauthCallbackView() {
           .then(() => {
             // 标记本会话由 SSO 建立：登出时据此联动 ADFS 单点登出
             setSsoLoginFlag();
-            router.replace(routeByRole(data.role));
+            // 学生入口统一落地学生预约页；顾问入口按角色进管理后台
+            router.replace(ssoPortal === "advisor" ? routeByRole(data.role) : STUDENT_HOME);
           });
       })
       .catch((error) => {
@@ -64,7 +67,7 @@ export default function OauthCallbackView() {
   }, []);
 
   const backToLogin = () =>
-    router.replace(portal === "advisor" ? "/f/007/admin-login" : "/f/007/user-login");
+    router.replace(portal === "advisor" ? ADMIN_LOGIN : STUDENT_LOGIN);
 
   return (
     <div className="h-screen w-full flex flex-col items-center justify-center gap-4 bg-[#f0f2f5]">

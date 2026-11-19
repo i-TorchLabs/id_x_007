@@ -25,6 +25,7 @@ export default {
     schedule: "My Schedule",
     appointments: "My Appointments",
   },
+  // Student header link back to admin console (advisor / admin only)
   // Student menu (UserLayout)
   menuUser: {
     advisors: "Consultants",

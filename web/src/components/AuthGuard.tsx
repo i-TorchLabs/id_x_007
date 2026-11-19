@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ADMIN_LOGIN, loginPathFor, routeByRole } from "@/utils/routes";
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -40,13 +41,19 @@ export default function AuthGuard({ children, role, roles, publicPaths = [], den
       userInfo = null;
     }
     if (!userInfo?.token) {
-      router.replace("/f/007/admin-login");
+      // 学生端（/f/007/user/**）未登录回学生登录页（仅 SSO），其余回管理后台登录页
+      router.replace(loginPathFor(window.location.pathname));
       setChecked(true);
       return;
     }
     const allowed = roles ?? (role ? [role] : null);
     if (allowed && !allowed.includes(userInfo.role || "")) {
-      router.replace(deniedRedirect || "/f/007/admin-login");
+      // 角色不符：优先用页面指定的回退目标；否则已知角色回自己的首页（学生不会被丢去管理员登录页），
+      // 角色缺失/异常才回登录页
+      const fallback = ["admin", "advisor", "student"].includes(userInfo.role || "")
+        ? routeByRole(userInfo.role || "")
+        : ADMIN_LOGIN;
+      router.replace(deniedRedirect || fallback);
       setChecked(true);
       return;
     }
