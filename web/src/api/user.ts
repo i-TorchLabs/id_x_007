@@ -119,9 +119,13 @@ export const logoutApi = async (userId: string): Promise<void> => {
 
 // ===== 顾问浏览 =====
 
-/** 可约时段（startTime/endTime 为格式化字符串） */
+/** 可约时段（startTime/endTime 为下一次 occurrence 的格式化字符串） */
 export interface AdvisorSlot {
   slotId: string;
+  weekday: number;
+  weekdayLabel: string;
+  startClock: string;
+  endClock: string;
   startTime: string;
   endTime: string;
   booked: string;

@@ -1,5 +1,4 @@
 import { callApi, callFileApi, type FileResponse } from "./graphql";
-import { localToMs } from "@/utils/format";
 import type { ManageAppointmentListRes } from "./admin";
 
 /**
@@ -26,15 +25,28 @@ const fileToBase64 = (file: File): Promise<string> =>
 
 // ===== 排期管理 =====
 
-/** 本人时段行（state: "1" 开放 / "0" 暂停；startTime/endTime 为格式化字符串） */
+/** 周排期行（state: "1" 开放 / "0" 暂停；startTime/endTime 为下一次 occurrence 的格式化字符串） */
 export interface MySlot {
   slotId: string;
+  weekday: number;
+  weekdayLabel: string;
+  slotDefId: string;
+  startClock: string;
+  endClock: string;
   startTime: string;
   endTime: string;
   startTimeMs: number;
   endTimeMs: number;
   booked: string;
   state: string;
+}
+
+/** 固定时段定义（slot-01 ~ slot-24，每段 30 分钟） */
+export interface SlotDef {
+  slotDefId: string;
+  code: string;
+  startClock: string;
+  endClock: string;
 }
 
 /** data 顶层含 advisorId 与 accepting（"1"/"0"），C-1 接待开关初始值取自此处 */
@@ -65,11 +77,21 @@ export const advisorMySlotListApi = async (data: {
   );
 };
 
-/** 时段表单（start_time/end_time 为 datetime-local 值） */
+/** 时段表单（星期几 + 固定时段定义） */
 export interface SlotFormValue {
-  start_time: string;
-  end_time: string;
+  weekday: string;
+  slotDefId: string;
 }
+
+/** 固定时段定义列表（新增/编辑时段选择用） */
+export const advisorSlotDefListApi = async () => {
+  return await callApi<{ list: SlotDef[] }>(
+    "slotDefList",
+    `query SlotDefList {
+      slotDefList { code msg data }
+    }`
+  );
+};
 
 export const advisorSlotCreateApi = async (data: SlotFormValue & { advisorId?: string }) => {
   return await callApi(
@@ -79,8 +101,8 @@ export const advisorSlotCreateApi = async (data: SlotFormValue & { advisorId?: s
     }`,
     {
       data: {
-        startTime: localToMs(data.start_time),
-        endTime: localToMs(data.end_time),
+        weekday: Number(data.weekday) || 0,
+        slotDefId: Number(data.slotDefId) || 0,
         advisorId: toAdvisorId(data.advisorId),
       },
     }
@@ -98,8 +120,8 @@ export const advisorSlotUpdateApi = async (
     {
       data: {
         slotId: Number(data.slotId) || 0,
-        startTime: localToMs(data.start_time),
-        endTime: localToMs(data.end_time),
+        weekday: Number(data.weekday) || 0,
+        slotDefId: Number(data.slotDefId) || 0,
         advisorId: toAdvisorId(data.advisorId),
       },
     }
@@ -114,6 +136,17 @@ export const advisorSlotDeleteApi = async (slotId: string, advisorId?: string) =
       advisorSlotDelete(data: $data) { code msg data }
     }`,
     { data: { slotId: Number(slotId) || 0, advisorId: toAdvisorId(advisorId) } }
+  );
+};
+
+/** 取消时段（时段转为暂停；已预约学生逐条取消并发送 cancelled_advisor 邮件、抄送顾问本人） */
+export const advisorSlotCancelApi = async (slotId: string, reason: string, advisorId?: string) => {
+  return await callApi<{ cancelledCount: number }>(
+    "advisorSlotCancel",
+    `mutation AdvisorSlotCancel($data: SlotCancelInput!) {
+      advisorSlotCancel(data: $data) { code msg data }
+    }`,
+    { data: { slotId: Number(slotId) || 0, reason, advisorId: toAdvisorId(advisorId) } }
   );
 };
 

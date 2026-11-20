@@ -17,26 +17,27 @@
 ## 1. 简介 (Introduction)
 
 - **Slogan**: 为高校朋辈辅导场景打造的排期与预约一站式平台 —— 管理端统一排期，学生一键预约，系统自动提醒。
-- **Description**: id_x_007 是运行于 **i-Core 可插拔内核**之上的业务插件模块，面向大学生事务办公室（UGO, University General Office）的朋辈顾问（Peer Consultant）咨询业务。系统打通「顾问建档 → 排期发布（单条新增 / Excel 批量导入）→ 学生浏览预约 → 每日定时提醒 → 取消 / 完成 / 反馈 → 运营统计导出」完整业务闭环。后端以 Litestar + Strawberry GraphQL 暴露单一 GraphQL 端点（`/b/id_x_007/graphql`），数据落 PostgreSQL `pa_*` 八张业务表；前端为 Next.js App Router + HeroUI 的中英双语站点（路由前缀 `/f/007`）；入口由 HAProxy 统一按路径分流。相比通用预约工具，本系统内建 CUHK ADFS 统一身份认证（OAuth2 授权码流）、数据库行级锁防超订、库表驱动的邮件模板体系与 advisory lock 防重的定时提醒调度器，可在多 worker 生产环境下直接部署。
+- **Description**: id_x_007 是运行于 **i-Core 可插拔内核**之上的业务插件模块，面向大学生事务办公室（UGO, University General Office）的朋辈顾问（Peer Consultant）咨询业务。系统打通「顾问建档 → 排期发布（单条新增 / Excel 批量导入）→ 学生浏览预约 → 每日定时提醒 → 取消 / 完成 / 反馈 → 运营统计导出」完整业务闭环。后端以 Litestar + Strawberry GraphQL 暴露单一 GraphQL 端点（`/b/id_x_007/graphql`），数据落 PostgreSQL `pa_*` 业务表；前端为 Next.js App Router + HeroUI 的中英双语站点（路由前缀 `/f/007`）；入口由 HAProxy 统一按路径分流。相比通用预约工具，本系统内建 CUHK ADFS 统一身份认证（OAuth2 授权码流）、数据库行级锁防超订、库表驱动的邮件模板体系与 advisory lock 防重的定时提醒调度器，可在多 worker 生产环境下直接部署。
 
 ## 2. 核心特性 (Features)
 
-- **顾问建档与排期管理**：管理员创建顾问档案（邮箱即 SSO 登录账号，唯一 / 年级 / 专业 / 擅长方向 / 简介 / 照片），建档时邮箱自动加入 SSO 登录白名单（allow=TRUE）；顾问经 SSO 登录顾问门户自助管理本人咨询时段，管理员亦可在「排期管理」中代管：单条增删改、暂停 / 恢复、「暂不接待」整体开关，以及 Excel（.xlsx）批量导入排期（逐行校验、失败行报告、同时段 upsert）。
+- **顾问建档与排期管理**：管理员创建顾问档案（邮箱即 SSO 登录账号，唯一 / 年级 / 专业 / 擅长方向 / 简介 / 照片），建档时邮箱自动加入 SSO 登录白名单（allow=TRUE）；排期按「星期几 + 固定时段」发布，不落具体日期：时段定义（slot-01 ~ slot-24，每段 30 分钟，09:00-21:00）独立存于 `pa_slot_def`，由 `ops/init/05_slot.sql` 预置、启动时幂等播种，顾问只能从固定时段中选择；周排期按自然周自动滚动到下一次 occurrence，无需定时任务轮转。顾问经 SSO 登录顾问门户自助管理本人排期，管理员亦可在「排期管理」中代管：单条增删改、暂停 / 恢复、取消本次时段（只跳过即将到来的那一次，周排期顺延到下一周；已预约学生逐条取消并邮件通知、抄送顾问本人，开始前 4 小时内禁止）、「暂不接待」整体开关，以及 Excel（.xlsx）批量导入排期（星期 / 开始时间 / 结束时间，按 30 分钟切割，逐行校验、失败行报告、同时段 upsert）。
 - **学生浏览与预约**：按专业 / 方向筛选顾问卡片，查看未来可约时段；预约须在开始前 24 小时之前提交，取消（学生侧 / 顾问侧或管理端代顾问）须填写取消原因、在开始前 4 小时内禁止；时段占用（每时段 1 人）与重复预约经数据库行级锁（`SELECT ... FOR UPDATE`）校验，并发下不超订。
-- **四类预约邮件通知**：按触发时点与收件人拆分为四类模板，均经 `pa_mail_template` 库表渲染（管理员可在线配置文案，缺失回退内置默认），发送结果无论成败均落库 `pa_email_log` 登记：
+- **五类预约邮件通知**：按触发时点与收件人拆分为五类模板，均经 `pa_mail_template` 库表渲染（管理员可在线配置文案，缺失回退内置默认），发送结果无论成败均落库 `pa_email_log` 登记：
   1. **预约成功确认**（`booked_student`，发学生）—— 学生预约成功后即时发送；
   2. **新预约通知**（`booked_advisor`，发顾问）—— 学生预约成功后即时发送；
   3. **预约前一天提醒**（`reminder`，发双方）—— 预约开始前一天 21:00（Asia/Shanghai）由调度器发送，以 PostgreSQL advisory lock 防多 worker 重复；
-  4. **学生取消预约**（`cancelled`，发双方）—— 学生在页面点击取消预约时即时发送。
+  4. **取消预约·学生**（`cancelled`，发学生）—— 学生在页面点击取消预约时即时发送；
+  5. **取消预约·顾问**（`cancelled_advisor`，发学生、抄送顾问本人）—— 顾问（或管理端代管）在「时段管理」点击「取消」跳过即将到来的那一次时段时，向该次每位已预约学生发送。
 - **双通道身份认证**：学生与朋辈顾问经 CUHK ADFS 统一身份认证（OAuth2 授权码流，id_token 服务端验签；登录账号（邮箱）命中管理员预建且启用中的顾问档案（按 pa_advisor.email 忽略大小写匹配）即为 advisor，否则建档为 student；经 `/admin-login` 的 Consultant SSO Login 登录须过 `pa_advisor_allow` 白名单（邮箱在名单中且 allow=TRUE），通过后以 advisor 角色进入管理后台（顾问管理模块仅 admin 可见）；学生经 `/user-login` 登录不受白名单限制、按顾问档案定角色，登录成功后一律落地学生预约页（`/f/007/user/advisors`，即使账号命中顾问档案也不进管理后台）；白名单经管理后台「顾问管理」中顾问档案的「SSO 登录许可」开关维护（新建顾问默认允许，后端白名单接口保留））
 - **管理后台数据域隔离**：advisor 角色在后台仅能查看 / 检索 / 修改 / 导入 / 导出本人的档案、排期、预约、反馈、统计与邮件日志（后端按本人顾问档案强制过滤，忽略入参 advisorId）；顾问新增 / 删除、邮件模板配置、SSO 登录白名单维护仅 admin；admin 可查看并操作所有顾问的数据；管理员账号密码登录采用 RSA-2048 传输加密 + 防爆破锁定（默认 5 次失败锁定 10 分钟）+ 连续失败后 SVG 图形验证码。顾问经顾问门户（`/f/007/advisor`）自助管理本人排期与预约，管理后台亦可代管。
 - **运营统计与导出**：预约总量 / 完成 / 取消 / 进行中统计与各顾问咨询量排名；预约明细与反馈汇总支持按顾问 / 月份过滤的 Excel 导出（base64 下载），顾问可导出本人历史预约数据；认证 / 变更 / 导出等敏感操作写入 JSON Lines 审计日志（按天轮转）。
 
 ## 3. 项目亮点 (Highlights)
 
-1. **行级锁防超订的并发预约内核** —— 预约与取消均先对 `pa_slot` 行执行 `with_for_update()` 加锁，再校验占用（`booked < 1`，每时段 1 人）、24 小时截止与重复预约，保证高并发场景下占用计数严格一致，杜绝超订。
+1. **行级锁防超订的并发预约内核** —— 预约与取消均先对 `pa_slot` 行执行 `with_for_update()` 加锁，再按 `(slot_id, start_time)` 校验占用（一次 occurrence 只容纳 1 人）、24 小时截止与重复预约；预约落库即快照 `book_date / start_time / end_time`，不依赖计数器，高并发下杜绝超订。
 2. **advisory lock 防重的定时提醒调度** —— 每日 21:00 的提醒任务执行前先竞争 PostgreSQL 会话级咨询锁 `pg_try_advisory_lock(775200721)`，多 worker 部署下仅一个进程实际发送，业务逻辑经 `asyncio.to_thread` 跑在线程池中不阻塞事件循环，单轮异常不终止调度循环。
-3. **库表驱动的邮件模板体系** —— 四类预约邮件（预约成功确认 / 新预约通知 / 前一天提醒 / 学生取消）主题与正文 HTML 存于 `pa_mail_template`（支持 `{apply_no}` 等占位符），管理员可在线 upsert 文案；建表时幂等播种默认模板（旧版单一 `booked` 正文自动迁移至拆分后的 student / advisor 两类），渲染时缺失回退代码内置默认；SMTP 未配置时跳过发送但仍落库 `status="skipped"`，便于上线后补查。
+3. **库表驱动的邮件模板体系** —— 五类预约邮件（预约成功确认 / 新预约通知 / 前一天提醒 / 学生取消 / 顾问取消时段）主题与正文 HTML 存于 `pa_mail_template`（支持 `{apply_no}` 等占位符），管理员可在线 upsert 文案；建表时幂等播种默认模板（旧版单一 `booked` 正文自动迁移至拆分后的 student / advisor 两类），渲染时缺失回退代码内置默认；SMTP 未配置时跳过发送但仍落库 `status="skipped"`，便于上线后补查；取消类邮件支持抄送（学生为主收件人、抄送顾问本人）。
 4. **纵深登录安全闭环** —— 登录凭据经 RSA-2048（OAEP-SHA256）端到端加密传输；口令以 PBKDF2 哈希落库且旧明文自动迁移；防爆破计数锁定 + 连续失败触发一次性 SVG 验证码；对不存在用户执行 DUMMY_HASH 校验抹平时序，防用户名枚举。
 5. **GraphQL 面收紧加固** —— 关闭 introspection（DisableIntrospection）、限制查询深度（QueryDepthLimiter, max_depth=8）、禁用 GraphiQL IDE、仅接受 POST 查询，显著缩小攻击面。
 6. **SSO 身份闭环** —— ADFS 授权码流换取 id_token 后服务端验签（含 nonce 防重放），只向前端签发独立会话 Token、不暴露 IdP 凭据；凭据配置（client_id / client_secret / redirect_uri）存 `pa_sso_settings` 表，运行期改表即生效。
@@ -86,7 +87,7 @@ graph TD
     end
 
     subgraph 数据层
-        PG[("PostgreSQL<br/>pa_user / pa_advisor / pa_advisor_allow<br/>pa_slot / pa_appointment / pa_feedback<br/>pa_email_log / pa_mail_template")]
+        PG[("PostgreSQL<br/>pa_user / pa_advisor / pa_advisor_allow<br/>pa_slot_def / pa_slot / pa_slot_cancel<br/>pa_appointment / pa_feedback<br/>pa_email_log / pa_mail_template")]
     end
 
     subgraph 外部依赖
@@ -133,11 +134,11 @@ sequenceDiagram
         V-->>B: {code: 401, msg: "Token Error"}
     else 鉴权通过
         Note over V: 表单校验（主题 / 内容 / 方式 / 电话 / 微信）
-        V->>PG: SELECT pa_slot WHERE id=? FOR UPDATE（行级锁）
+        V->>PG: SELECT pa_slot WHERE id=? FOR UPDATE（行级锁）<br/>按 (slot_id, start_time) 判断占用
         alt 时段暂停 / 顾问停用或暂不接待 / 距开始 ≤ 24h / 时段已被预约 / 重复预约
             V-->>B: {code: 403, msg: "拒绝原因"}
         else 校验全部通过
-            V->>PG: INSERT pa_appointment（单号 A+8 位数字）<br/>UPDATE pa_slot SET booked = booked + 1
+            V->>PG: INSERT pa_appointment（单号 A+8 位数字<br/>快照 book_date / start_time / end_time）
             PG-->>V: COMMIT
             V->>MAIL: render_mail("booked_student" / "booked_advisor")
             MAIL->>SMTP: 学生收「预约成功确认」、顾问收「新预约通知」
@@ -216,7 +217,7 @@ id_x_007/
 | advisorSlotList | 登录 | 指定顾问的全部可约时段 |
 | myAppointmentList | 登录 | 我的预约列表（分页，附可取消标记） |
 | advisorMySlotList | admin / advisor | 顾问排期列表（advisor 本人；admin 代管须传 advisorId；含暂停时段） |
-| advisorSlotTemplate | admin / advisor | 批量排期模板下载（xlsx：日期 / 开始时间 / 结束时间） |
+| advisorSlotTemplate | admin / advisor | 批量排期模板下载（xlsx：星期 / 开始时间 / 结束时间） |
 | advisorAppointmentList | admin / advisor | 顾问预约明细（advisor 仅本人；admin 代管须传 advisorId；可按日期 / 状态筛选） |
 | advisorAppointmentExport | admin / advisor | 顾问个人历史预约导出（advisor 仅本人；可按月份过滤） |
 | manageAdvisorList | admin 全量 / advisor 仅本人 | 顾问列表（keyword 匹配姓名 / 用户名 / 专业 / 方向） |
@@ -225,7 +226,7 @@ id_x_007/
 | manageFeedbackList | admin 全量 / advisor 仅本人 | 反馈列表（可按顾问 / 月份筛选） |
 | manageStats | admin 全量 / advisor 仅本人口径 | 运营统计：总量 / 完成 / 取消 / 进行中 + 顾问咨询量排名 |
 | manageEmailLogList | admin 全量 / advisor 仅本人预约关联 | 邮件发送日志（可按类型筛选） |
-| manageMailTemplateList | admin | 邮件模板列表（booked_student 预约成功确认 / booked_advisor 新预约通知 / reminder 前一天提醒 / cancelled 学生取消 四类） |
+| manageMailTemplateList | admin | 邮件模板列表（booked_student 预约成功确认 / booked_advisor 新预约通知 / reminder 前一天提醒 / cancelled 学生取消 / cancelled_advisor 顾问取消时段 五类） |
 | manageAppointmentExport | admin 全量 / advisor 仅本人 | 预约导出（可按顾问 / 月份过滤） |
 | manageFeedbackExport | admin 全量 / advisor 仅本人 | 反馈汇总导出（可按顾问 / 月份过滤） |
 
@@ -240,14 +241,15 @@ id_x_007/
 | logout | 登录 | 登出（失效会话 Token） |
 | oauthLogin | 无 | CUHK SSO 登录（ADFS 授权码流；顾问入口须过 pa_advisor_allow 白名单、通过后签发 advisor 会话进入管理后台；学生入口不校验白名单、按顾问档案定 advisor/student，登录成功后落地学生预约页；首次登录自动建档） |
 | studentAppointmentCreate | 登录 | 学生预约（24h 截止 / 行锁占用校验 / 重复拦截 / 双方邮件通知；不限制账号角色） |
-| studentAppointmentCancel | 登录 | 学生取消预约（须填取消原因；开始前 4 小时内禁止；双方邮件通知） |
+| studentAppointmentCancel | 登录 | 学生取消预约（须填取消原因；开始前 4 小时内禁止；邮件通知学生） |
 | advisorSlotCreate | admin / advisor | 新增咨询时段（advisor 本人；admin 代管须传 advisorId） |
 | advisorSlotUpdate | admin / advisor | 修改咨询时段（起止时间） |
 | advisorSlotDelete | admin / advisor | 删除咨询时段（存在预约记录时拒绝） |
+| advisorSlotCancel | admin / advisor | 取消咨询时段（时段转为暂停，已预约学生逐条取消并发送 `cancelled_advisor` 邮件、抄送顾问本人；开始前 4 小时内禁止） |
 | advisorSlotState | admin / advisor | 暂停 / 恢复咨询时段 |
-| advisorSlotBatchUpload | admin / advisor | 批量上传排期（xlsx，逐行校验返回成功 / 失败行报告） |
+| advisorSlotBatchUpload | admin / advisor | 批量上传排期（xlsx：星期 / 开始时间 / 结束时间，按 30 分钟切割录入；逐行校验返回成功 / 失败行报告） |
 | advisorAcceptingSet | admin / advisor | 设置顾问「暂不接待」整体开关 |
-| advisorAppointmentCancel | admin / advisor | 顾问取消预约（须填原因；开始前 4 小时内禁止） |
+| advisorAppointmentCancel | admin / advisor | 顾问取消预约（须填原因；开始前 4 小时内禁止；邮件通知学生并抄送顾问） |
 | advisorAppointmentComplete | admin / advisor | 标记咨询完成（开始时间已过方可） |
 | feedbackSet | admin / advisor | 填写 / 更新咨询反馈（仅 completed 预约，upsert） |
 | manageAdvisorCreate | admin | 创建顾问（仅建顾问档案，不建用户账号） |

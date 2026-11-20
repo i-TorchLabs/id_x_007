@@ -1,6 +1,14 @@
 /** 时段管理页文案（schedule 命名空间，ScheduleView / ScheduleManagementView 共用） */
 export default {
   // 表头与表单字段
+  weekday: "星期",
+  weekday1: "星期一",
+  weekday2: "星期二",
+  weekday3: "星期三",
+  weekday4: "星期四",
+  weekday5: "星期五",
+  weekday6: "星期六",
+  weekday7: "星期日",
   startTime: "开始时间",
   endTime: "结束时间",
   bookedState: "预约情况",
@@ -23,8 +31,20 @@ export default {
   resume: "恢复",
   pause: "暂停",
   delete: "删除",
+  cancelSlot: "取消",
+  // 取消时段弹窗（已预约学生逐条取消并邮件通知，抄送顾问本人；开始前 4 小时内按钮禁用）
+  confirmCancelSlot: "确认取消该时段",
+  cancelSlotRange: "取消 {weekday}（{date}）{start}-{end} 这一次时段？",
+  cancelSlotNotify: "该时段有 {count} 名学生已预约，取消后将向学生发送取消通知邮件，并抄送顾问本人。",
+  cancelSlotNoBooking: "该时段本次暂无学生预约，取消仅作用于即将到来的这一次，周排期继续保留。",
+  cancelSlotReasonPlaceholder: "取消原因（选填，将随邮件告知学生）",
+  back: "返回",
+  slotCancelled: "时段已取消（取消预约 {count} 条）。",
+  cancelSlotFail: "取消失败。",
   // 新增/编辑弹窗
   editSlotTitle: "编辑时段",
+  slotRange: "时段",
+  slotPlaceholder: "请选择时段",
   cancel: "取消",
   submit: "提交",
   // 批量上传结果弹窗
@@ -34,12 +54,11 @@ export default {
   close: "关闭",
   // 删除确认弹窗
   confirmDelete: "确认删除",
-  deleteSlotRange: "删除时段 {start} ~ {end}？",
+  deleteSlotRange: "删除 {weekday} {start}-{end} 的周排期？",
   deleteConstraint: "已存在预约的时段无法删除。",
   // 校验与 toast 提示
   loadFail: "加载数据失败。",
-  timeRequired: "开始时间和结束时间为必填项。",
-  endAfterStart: "结束时间必须晚于开始时间。",
+  slotRequired: "请选择星期和时段。",
   saved: "保存成功。",
   saveFail: "保存失败。",
   slotPaused: "时段已暂停。",

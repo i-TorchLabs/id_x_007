@@ -1,8 +1,8 @@
 """定时调度：每天 21:00（Asia/Shanghai）扫描次日预约并发送「预约前一天提醒」邮件。
 
-对应四类预约模板中的第 3 类（reminder）：触发时点为预约开始前一天 21:00，
-收件人为学生与顾问双方；其余三类（booked_student / booked_advisor / cancelled）
-在预约、取消动作中即时发送，不经过本调度器。
+对应预约模板中的 reminder：触发时点为预约开始前一天 21:00，
+收件人为学生与顾问双方；其余类型（booked_student / booked_advisor / cancelled /
+cancelled_advisor）在预约、取消动作中即时发送，不经过本调度器。
 
 实现要点：
 - asyncio 后台任务：计算到下一个 21:00 的秒数后 sleep，到点执行再循环；
@@ -25,7 +25,6 @@ from utils.log_util import logger
 from x_models.id_x_007.src.models.x_models import (
     PaAdvisor,
     PaAppointment,
-    PaSlot,
     PaUser,
     get_session,
 )
@@ -72,18 +71,18 @@ def _send_tomorrow_reminders() -> None:
             tomorrow = datetime.now(_TZ).date() + timedelta(days=1)
             window_start = datetime(tomorrow.year, tomorrow.month, tomorrow.day)
             window_end = window_start + timedelta(days=1)
+            # 起止时间取预约快照（周排期不含具体日期）
             rows = session.execute(
-                select(PaAppointment, PaSlot)
-                .join(PaSlot, PaAppointment.slot_id == PaSlot.id)
+                select(PaAppointment)
                 .where(
                     PaAppointment.state == "booked",
-                    PaSlot.start_time >= window_start,
-                    PaSlot.start_time < window_end,
+                    PaAppointment.start_time >= window_start,
+                    PaAppointment.start_time < window_end,
                 )
-                .order_by(PaSlot.start_time)
-            ).all()
+                .order_by(PaAppointment.start_time)
+            ).scalars().all()
             logger.info(f"提醒调度：次日 {tomorrow} 共 {len(rows)} 条有效预约")
-            for appt, slot in rows:
+            for appt in rows:
                 advisor = session.execute(
                     select(PaAdvisor).where(PaAdvisor.id == appt.advisor_id)
                 ).scalars().first()
@@ -101,8 +100,8 @@ def _send_tomorrow_reminders() -> None:
                     "student_name": appt.student_name,  # 兼容库表中仍用 {student_name} 的旧模板
                     "student_email": student.email if student else "",
                     "student_no": appt.student_no,
-                    "start_time": _fmt(slot.start_time),
-                    "end_time": _fmt(slot.end_time),
+                    "start_time": _fmt(appt.start_time),
+                    "end_time": _fmt(appt.end_time),
                     "topic": appt.topic,
                     "mode": "线上" if appt.mode == "online" else "线下",
                     "extra": "",

@@ -19,7 +19,7 @@ import re
 import secrets
 import string
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 from io import BytesIO
 from typing import Any
 
@@ -41,6 +41,8 @@ from x_models.id_x_007.src.models.x_models import (
     PaFeedback,
     PaMailTemplate,
     PaSlot,
+    PaSlotCancel,
+    PaSlotDef,
     PaSsoSettings,
     PaUser,
     get_session,
@@ -79,6 +81,7 @@ from x_models.id_x_007.src.schemas.x_schemas import (
     RegisterInput,
     SlotBatchUploadInput,
     SlotCreateInput,
+    SlotCancelInput,
     SlotIdInput,
     SlotStateInput,
     SlotUpdateInput,
@@ -116,6 +119,16 @@ BOOK_DEADLINE_HOURS = 24
 CANCEL_DEADLINE_HOURS = 4
 # 咨询方式白名单
 VALID_MODES = ("online", "offline")
+# 星期标签（1=周一 ... 7=周日，与 date.isoweekday() 对齐）
+WEEKDAY_LABELS = {
+    1: "星期一",
+    2: "星期二",
+    3: "星期三",
+    4: "星期四",
+    5: "星期五",
+    6: "星期六",
+    7: "星期日",
+}
 # 预约状态白名单
 VALID_APPOINTMENT_STATES = ("booked", "cancelled_student", "cancelled_advisor", "completed")
 # 状态中文标签（导出用）
@@ -243,27 +256,6 @@ def _clamp_page(page: Any, page_size: Any) -> tuple[int, int]:
     except (TypeError, ValueError):
         page_size = 10
     return max(page, 1), min(max(page_size, 1), MAX_PAGE_LIMIT)
-
-
-def _ms_to_dt(value: Any) -> datetime | None:
-    """毫秒时间戳安全解析：非法/越界返回 None，不抛 500。"""
-    try:
-        return datetime.fromtimestamp(int(value) / 1000)
-    except (TypeError, ValueError, OverflowError, OSError):
-        return None
-
-
-def _parse_dt(value: Any) -> datetime | None:
-    """时段时间入参解析：毫秒时间戳字符串或 ISO（YYYY-MM-DD HH:MM[:SS]），失败返回 None。"""
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if text.isdigit():
-        return _ms_to_dt(text)
-    try:
-        return datetime.fromisoformat(text.replace("T", " ")[:19])
-    except ValueError:
-        return None
 
 
 def _to_int(value: Any) -> int | None:
@@ -417,7 +409,10 @@ def _mode_label(mode: str) -> str:
 
 def mail_context(session, appt: PaAppointment, slot: PaSlot, advisor_name: str,
                  intro: str = "", extra: str = "") -> dict:
-    """构造邮件模板渲染上下文（与 pa_mail_template 占位符一一对应）。"""
+    """构造邮件模板渲染上下文（与 pa_mail_template 占位符一一对应）。
+
+    起止时间取预约落库快照（appt.start_time/end_time），周排期改动不影响历史邮件。
+    """
     student = _first(session, select(PaUser).where(PaUser.id == appt.student_user_id))
     return {
         "intro": intro,
@@ -426,8 +421,8 @@ def mail_context(session, appt: PaAppointment, slot: PaSlot, advisor_name: str,
         "student_name": appt.student_name,  # 兼容库表中仍用 {student_name} 的旧模板
         "student_email": student.email if student else "",
         "student_no": appt.student_no,
-        "start_time": _fmt_dt(slot.start_time),
-        "end_time": _fmt_dt(slot.end_time),
+        "start_time": _fmt_dt(appt.start_time),
+        "end_time": _fmt_dt(appt.end_time),
         "topic": appt.topic,
         "mode": _mode_label(appt.mode),
         "extra": f"<p>{extra}</p>" if extra else "",
@@ -435,31 +430,19 @@ def mail_context(session, appt: PaAppointment, slot: PaSlot, advisor_name: str,
 
 
 def _notify_one(session, *, mail_type: str, mail_to: str, appt: PaAppointment,
-                slot: PaSlot, advisor_name: str, intro: str, extra: str = "") -> None:
+                slot: PaSlot, advisor_name: str, intro: str, extra: str = "",
+                cc: str = "") -> None:
     """按指定模板类型给单个收件人发通知邮件（落 pa_email_log，失败不影响主流程）。
 
     主题与正文经 pa_mail_template 渲染（管理员可配置），模板缺失回退内置默认。
+    cc 为抄送地址（如「学生为主收件人、抄送顾问本人」场景）。
     """
     if not mail_to or mail_to == "N/A":
         return
     subject, content = render_mail(
         session, mail_type, mail_context(session, appt, slot, advisor_name, intro, extra)
     )
-    send_mail(session, mail_to, mail_type, subject, content, appt.id)
-
-
-def _notify_both(session, *, mail_type: str, appt: PaAppointment, slot: PaSlot,
-                 advisor_name: str, intro: str, extra: str = "",
-                 student_user: PaUser | None = None,
-                 advisor_email: str = "") -> None:
-    """给学生与顾问各发一封同类型通知邮件（用于取消等双方同文案场景）。"""
-    if student_user:
-        _notify_one(session, mail_type=mail_type, mail_to=student_user.email,
-                    appt=appt, slot=slot, advisor_name=advisor_name,
-                    intro=intro, extra=extra)
-    _notify_one(session, mail_type=mail_type, mail_to=advisor_email,
-                appt=appt, slot=slot, advisor_name=advisor_name,
-                intro=intro, extra=extra)
+    send_mail(session, mail_to, mail_type, subject, content, appt.id, cc=cc)
 
 
 def _style_header_row(ws, col_count: int) -> None:
@@ -972,30 +955,157 @@ def view_oauth_login(info: Info, data: OauthInput) -> ApiResponse:
 # ---------------------------
 # 学生端 · 顾问浏览与预约
 # ---------------------------
+def _clock_to_time(clock: str) -> dtime | None:
+    """HH:MM 文本转 time；非法返回 None。"""
+    try:
+        return datetime.strptime(str(clock or "").strip(), "%H:%M").time()
+    except ValueError:
+        return None
+
+
+def _clock_minutes(clock: str) -> int | None:
+    """HH:MM 文本转当日分钟数；非法返回 None。"""
+    t = _clock_to_time(clock)
+    return t.hour * 60 + t.minute if t else None
+
+
+def _weekday_label(weekday: int) -> str:
+    return WEEKDAY_LABELS.get(int(weekday), "")
+
+
+def _weekly_occurrence(weekday: int, start_clock: str, end_clock: str,
+                       now: datetime, lead_hours: int = 0) -> tuple[datetime, datetime] | None:
+    """按自然周滚动计算「下一次」occurrence（含起止日期时间）。
+
+    一周从星期一开始；今日即目标星期时优先本周，若开始时刻已不满足
+    lead_hours 前瞻量则顺延到下周。由此实现排期「自动按周轮转」：
+    不需要定时任务改数据，已约占用也随周次自然翻篇。
+    """
+    start_t = _clock_to_time(start_clock)
+    end_t = _clock_to_time(end_clock)
+    if not start_t or not end_t or int(weekday) not in WEEKDAY_LABELS:
+        return None
+    days = (int(weekday) - now.isoweekday()) % 7
+    start_dt = datetime.combine(now.date() + timedelta(days=days), start_t)
+    if start_dt <= now + timedelta(hours=lead_hours):
+        start_dt += timedelta(days=7)
+    end_dt = datetime.combine(start_dt.date(), end_t)
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
+    return start_dt, end_dt
+
+
+def _cancelled_dates(session, slot_ids: list[int], since: date) -> dict[int, set[date]]:
+    """这些周排期在 since 之后被「取消本次」跳过的日期，按 slot_id 归集。"""
+    if not slot_ids:
+        return {}
+    rows = session.execute(
+        select(PaSlotCancel.slot_id, PaSlotCancel.occur_date).where(
+            PaSlotCancel.slot_id.in_(slot_ids),
+            PaSlotCancel.occur_date >= since,
+        )
+    ).all()
+    out: dict[int, set[date]] = {}
+    for slot_id, occur_date in rows:
+        out.setdefault(slot_id, set()).add(occur_date)
+    return out
+
+
+# 一次取消只跳过一周，连续的取消记录最多顺延这么多周，避免死循环
+MAX_SKIP_WEEKS = 12
+
+
+def _next_open_occurrence(slot: PaSlot, slot_def: PaSlotDef, now: datetime,
+                          skipped: set[date] | None = None,
+                          lead_hours: int = 0) -> tuple[datetime, datetime] | None:
+    """周排期「下一次真正开放」的 occurrence：跳过被取消的日期，最多顺延 MAX_SKIP_WEEKS 周。"""
+    skipped = skipped or set()
+    probe = now
+    for _ in range(MAX_SKIP_WEEKS):
+        occurrence = _weekly_occurrence(
+            slot.weekday, slot_def.start_clock, slot_def.end_clock, probe, lead_hours
+        )
+        if not occurrence:
+            return None
+        if occurrence[0].date() not in skipped:
+            return occurrence
+        probe = occurrence[0]
+    return None
+
+
+def _booked_starts(session, advisor_id: int, now: datetime) -> set[tuple[int, datetime]]:
+    """该顾问未来有效预约的 (slot_id, start_time) 集合，用于按 occurrence 判断占用。"""
+    rows = session.execute(
+        select(PaAppointment.slot_id, PaAppointment.start_time).where(
+            PaAppointment.advisor_id == advisor_id,
+            PaAppointment.state == "booked",
+            PaAppointment.start_time >= now,
+        )
+    ).all()
+    return {(row[0], row[1]) for row in rows}
+
+
 def _bookable_slots_of(session, advisor: PaAdvisor, now: datetime, limit: int | None = None) -> list[dict]:
-    """顾问当前可约时段：开放中、未被预约、距开始 > 24 小时；顾问「暂不接待」时为空。"""
+    """顾问当前可约时段：开放中、下一次 occurrence 未被预约、距开始 > 24 小时。
+
+    顾问「暂不接待」或停用时为空。每条周排期按其星期几滚动出下一次具体日期，
+    与预约落库口径一致（_weekly_occurrence + BOOK_DEADLINE_HOURS）。
+    """
     if advisor.accepting != "1" or advisor.status != "1":
         return []
-    deadline = now + timedelta(hours=BOOK_DEADLINE_HOURS)
-    query = (
-        select(PaSlot)
+    rows = session.execute(
+        select(PaSlot, PaSlotDef)
+        .join(PaSlotDef, PaSlot.slot_def_id == PaSlotDef.id)
         .where(
             PaSlot.advisor_id == advisor.id,
             PaSlot.state == "1",
-            PaSlot.booked < 1,
-            PaSlot.start_time > deadline,
+            PaSlotDef.state == "1",
         )
-        .order_by(PaSlot.start_time)
-    )
-    if limit:
-        query = query.limit(limit)
-    slots = session.execute(query).scalars().all()
-    return [{
-        "slotId": s.id,
-        "startTime": _fmt_dt(s.start_time),
-        "endTime": _fmt_dt(s.end_time),
-        "booked": s.booked,
-    } for s in slots]
+    ).all()
+    booked = _booked_starts(session, advisor.id, now)
+    skipped = _cancelled_dates(session, [slot.id for slot, _ in rows], now.date())
+    items: list[dict] = []
+    for slot, slot_def in rows:
+        occurrence = _next_open_occurrence(
+            slot, slot_def, now, skipped.get(slot.id), BOOK_DEADLINE_HOURS
+        )
+        if not occurrence or (slot.id, occurrence[0]) in booked:
+            continue
+        items.append({
+            "slotId": slot.id,
+            "weekday": slot.weekday,
+            "weekdayLabel": _weekday_label(slot.weekday),
+            "startClock": slot_def.start_clock,
+            "endClock": slot_def.end_clock,
+            "startTime": _fmt_dt(occurrence[0]),
+            "endTime": _fmt_dt(occurrence[1]),
+            "booked": 0,
+        })
+    items.sort(key=lambda item: item["startTime"])
+    return items[:limit] if limit else items
+
+
+def view_slot_def_list(info: Info) -> ApiResponse:
+    """固定时段定义列表（新增/编辑周排期时选择用；admin 与 advisor 均可读）。"""
+    if not _verify_admin_or_advisor(info):
+        return _resp(401, "Token Error")
+    maker = get_session()
+    with maker() as session:
+        try:
+            objs = session.execute(
+                select(PaSlotDef).where(PaSlotDef.state == "1")
+                .order_by(PaSlotDef.sort_no, PaSlotDef.id)
+            ).scalars().all()
+            return _resp(200, "success", {"list": [{
+                "slotDefId": obj.id,
+                "code": obj.code,
+                "startClock": obj.start_clock,
+                "endClock": obj.end_clock,
+            } for obj in objs]})
+        except Exception as e:
+            logger.error(f"{_rid()}{e}")
+            session.rollback()
+            return _resp(500, "服务器错误")
 
 
 def view_advisor_list(info: Info, data: AdvisorListInput) -> ApiResponse:
@@ -1082,29 +1192,27 @@ def view_my_appointment_list(info: Info, data: PageInput) -> ApiResponse:
         try:
             page, page_size = _clamp_page(data.page, data.page_size)
             now = datetime.now()
-            query = (
-                select(PaAppointment, PaSlot)
-                .join(PaSlot, PaAppointment.slot_id == PaSlot.id)
-                .where(PaAppointment.student_user_id == user.id)
+            query = select(PaAppointment).where(
+                PaAppointment.student_user_id == user.id
             )
             total = _count(session, query)
             rows = session.execute(
                 query.order_by(desc(PaAppointment.create_time), desc(PaAppointment.id))
                 .offset((page - 1) * page_size).limit(page_size)
-            ).all()
+            ).scalars().all()
             detail = []
-            for appt, slot in rows:
+            for appt in rows:
                 advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == appt.advisor_id))
                 detail.append({
                     "appointmentId": appt.id,
                     "applyNo": appt.apply_no,
                     "advisorName": advisor.name if advisor else "N/A",
-                    "startTime": _fmt_dt(slot.start_time),
-                    "endTime": _fmt_dt(slot.end_time),
+                    "startTime": _fmt_dt(appt.start_time),
+                    "endTime": _fmt_dt(appt.end_time),
                     "topic": appt.topic,
                     "mode": appt.mode,
                     "state": appt.state,
-                    "cancelable": _cancelable(appt.state, slot.start_time, now),
+                    "cancelable": _cancelable(appt.state, appt.start_time, now),
                     "createTime": _fmt_dt(appt.create_time, "%Y-%m-%d %H:%M:%S"),
                 })
             return _resp(200, "success", {"total": total, "list": detail})
@@ -1145,7 +1253,7 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
     maker = get_session()
     with maker() as session:
         try:
-            # 并发安全：对 slot 行加锁后再校验占用与重复预约
+            # 并发安全：对周排期行加锁后再校验占用与重复预约
             slot = session.execute(
                 select(PaSlot).where(PaSlot.id == data.slot_id).with_for_update()
             ).scalars().first()
@@ -1153,27 +1261,37 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
                 return _resp(404, "时段不存在")
             if slot.state != "1":
                 return _resp(403, "该时段已暂停预约")
+            slot_def = _first(session, select(PaSlotDef).where(PaSlotDef.id == slot.slot_def_id))
+            if not slot_def or slot_def.state != "1":
+                return _resp(403, "该时段已停用")
             advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == slot.advisor_id))
             if not advisor or advisor.status != "1":
                 return _resp(403, "顾问不可预约")
             if advisor.accepting != "1":
                 return _resp(403, "该顾问暂不接待预约")
             now = datetime.now()
-            if now >= slot.start_time - timedelta(hours=BOOK_DEADLINE_HOURS):
+            # 周排期按自然周滚动：计算该星期几的下一次 occurrence（跳过已取消日期，须满足 24h 截止）
+            skipped = _cancelled_dates(session, [slot.id], now.date())
+            occurrence = _next_open_occurrence(
+                slot, slot_def, now, skipped.get(slot.id), BOOK_DEADLINE_HOURS
+            )
+            if not occurrence:
                 return _resp(403, f"需在咨询开始前 {BOOK_DEADLINE_HOURS} 小时之前预约")
-            if slot.booked >= 1:
-                return _resp(403, "该时段已被预约")
+            start_dt, end_dt = occurrence
             dup = _first(session, select(PaAppointment.id).where(
                 PaAppointment.slot_id == slot.id,
-                PaAppointment.student_user_id == user.id,
+                PaAppointment.start_time == start_dt,
                 PaAppointment.state == "booked",
             ))
             if dup:
-                return _resp(403, "您已预约该时段，请勿重复预约")
+                return _resp(403, "该时段已被预约")
             apply_no = _gen_apply_no(session)
             appt = PaAppointment(
                 apply_no=apply_no,
                 slot_id=slot.id,
+                book_date=start_dt.date(),
+                start_time=start_dt,
+                end_time=end_dt,
                 advisor_id=advisor.id,
                 student_user_id=user.id,
                 student_name=user.name,
@@ -1186,7 +1304,6 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
                 meeting_link=meeting_link,
                 state="booked",
             )
-            slot.booked += 1
             slot.update_time = now
             session.add(appt)
             session.commit()
@@ -1224,7 +1341,7 @@ def view_student_appointment_create(info: Info, data: AppointmentCreateInput) ->
 
 
 def view_student_appointment_cancel(info: Info, data: AppointmentIdInput) -> ApiResponse:
-    """学生取消自己的预约（须填取消原因；开始前 4 小时内禁止），双方邮件通知。"""
+    """学生取消自己的预约（须填取消原因；开始前 4 小时内禁止），邮件通知学生。"""
     user = _verify_token(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1243,36 +1360,37 @@ def view_student_appointment_cancel(info: Info, data: AppointmentIdInput) -> Api
                 return _resp(403, "无权操作该预约")
             if appt.state != "booked":
                 return _resp(403, "当前状态不可取消")
-            # 对 slot 行加锁，保证 booked 计数在并发下准确
+            # 对周排期行加锁，避免与并发预约/取消交叉
             slot = session.execute(
                 select(PaSlot).where(PaSlot.id == appt.slot_id).with_for_update()
             ).scalars().first()
             if not slot:
                 return _resp(404, "时段不存在")
             now = datetime.now()
-            if now >= slot.start_time - timedelta(hours=CANCEL_DEADLINE_HOURS):
+            if now >= appt.start_time - timedelta(hours=CANCEL_DEADLINE_HOURS):
                 return _resp(403, f"咨询开始前 {CANCEL_DEADLINE_HOURS} 小时内不可取消")
             appt.state = "cancelled_student"
             appt.cancel_reason = reason
             appt.update_time = now
-            slot.booked = max(slot.booked - 1, 0)
             slot.update_time = now
             session.commit()
             logger.info(f"{_rid()}学生取消预约 {appt.apply_no}：{reason}")
             audit("appointment.cancel", user, info=info, target=appt.apply_no,
                   detail=f"学生取消，原因={reason}")
             advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == appt.advisor_id))
-            _notify_both(
-                session,
-                mail_type="cancelled",
-                appt=appt,
-                slot=slot,
-                advisor_name=advisor.name if advisor else "N/A",
-                intro="以下朋辈咨询预约已由学生取消：",
-                extra=f"取消原因：{reason}",
-                student_user=_first(session, select(PaUser).where(PaUser.id == user.id)),
-                advisor_email=advisor.email if advisor else "",
-            )
+            student_user = _first(session, select(PaUser).where(PaUser.id == user.id))
+            # 学生取消：仅发 cancelled 给学生（与「取消预约（学生）」模板对齐）
+            if student_user:
+                _notify_one(
+                    session,
+                    mail_type="cancelled",
+                    mail_to=student_user.email,
+                    appt=appt,
+                    slot=slot,
+                    advisor_name=advisor.name if advisor else "N/A",
+                    intro="以下朋辈咨询预约已由您取消：",
+                    extra=f"取消原因：{reason}",
+                )
             session.commit()
             return _resp(200, "取消成功")
         except Exception as e:
@@ -1299,19 +1417,38 @@ def view_advisor_my_slot_list(info: Info, data: AdvisorPageInput) -> ApiResponse
             query = select(PaSlot).where(PaSlot.advisor_id == advisor.id)
             total = _count(session, query)
             objs = session.execute(
-                query.order_by(desc(PaSlot.start_time), desc(PaSlot.id))
+                query.order_by(PaSlot.weekday, PaSlot.slot_def_id, desc(PaSlot.id))
                 .offset((page - 1) * page_size).limit(page_size)
             ).scalars().all()
-            detail = [{
-                "slotId": obj.id,
-                "startTime": _fmt_dt(obj.start_time),
-                "endTime": _fmt_dt(obj.end_time),
-                # 编辑回填用毫秒时间戳
-                "startTimeMs": _dt_ms(obj.start_time),
-                "endTimeMs": _dt_ms(obj.end_time),
-                "booked": obj.booked,
-                "state": obj.state,
-            } for obj in objs]
+            now = datetime.now()
+            booked = _booked_starts(session, advisor.id, now)
+            skipped = _cancelled_dates(session, [obj.id for obj in objs], now.date())
+            detail = []
+            for obj in objs:
+                slot_def = _first(session, select(PaSlotDef).where(
+                    PaSlotDef.id == obj.slot_def_id
+                ))
+                if not slot_def:
+                    continue
+                occurrence = _next_open_occurrence(
+                    obj, slot_def, now, skipped.get(obj.id)
+                )
+                start_dt, end_dt = occurrence if occurrence else (None, None)
+                detail.append({
+                    "slotId": obj.id,
+                    "weekday": obj.weekday,
+                    "weekdayLabel": _weekday_label(obj.weekday),
+                    "slotDefId": slot_def.id,
+                    "startClock": slot_def.start_clock,
+                    "endClock": slot_def.end_clock,
+                    # 下一次 occurrence 的日期时间，供列表展示
+                    "startTime": _fmt_dt(start_dt),
+                    "endTime": _fmt_dt(end_dt),
+                    "startTimeMs": _dt_ms(start_dt),
+                    "endTimeMs": _dt_ms(end_dt),
+                    "booked": 1 if start_dt and (obj.id, start_dt) in booked else 0,
+                    "state": obj.state,
+                })
             return _resp(200, "success", {
                 "total": total,
                 "list": detail,
@@ -1324,8 +1461,21 @@ def view_advisor_my_slot_list(info: Info, data: AdvisorPageInput) -> ApiResponse
             return _resp(500, "服务器错误")
 
 
+def _resolve_slot_def(session, slot_def_id: Any, weekday: Any) -> tuple[PaSlotDef | None, int, str]:
+    """校验星期几与时段定义，返回 (时段定义, 星期几, 错误消息)。"""
+    wd = _to_int(weekday)
+    if wd not in WEEKDAY_LABELS:
+        return None, 0, "星期不合法（1周一...7周日）"
+    slot_def = _first(session, select(PaSlotDef).where(
+        PaSlotDef.id == _to_int(slot_def_id), PaSlotDef.state == "1"
+    ))
+    if not slot_def:
+        return None, wd, "时段不存在或已停用"
+    return slot_def, wd, ""
+
+
 def view_advisor_slot_create(info: Info, data: SlotCreateInput) -> ApiResponse:
-    """新增咨询时段（advisor 本人或 admin 代管；admin 须指定 advisorId）。"""
+    """新增周排期（星期几 + 固定时段；同一顾问同星期同固定时段唯一）。"""
     user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1335,26 +1485,28 @@ def view_advisor_slot_create(info: Info, data: SlotCreateInput) -> ApiResponse:
             advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
             if not advisor:
                 return _resp(400, err)
-            start_dt = _parse_dt(data.start_time)
-            end_dt = _parse_dt(data.end_time)
-            if not start_dt or not end_dt:
-                return _resp(400, "时间格式不合法")
-            if start_dt >= end_dt:
-                return _resp(400, "开始时间需早于结束时间")
-            if start_dt <= datetime.now():
-                return _resp(400, "只能创建未来的时段")
+            slot_def, weekday, err = _resolve_slot_def(session, data.slot_def_id, data.weekday)
+            if not slot_def:
+                return _resp(400, err)
+            exists = _first(session, select(PaSlot).where(
+                PaSlot.advisor_id == advisor.id,
+                PaSlot.weekday == weekday,
+                PaSlot.slot_def_id == slot_def.id,
+            ))
+            if exists:
+                return _resp(400, "该星期该时段已存在排期")
             obj = PaSlot(
                 advisor_id=advisor.id,
-                start_time=start_dt,
-                end_time=end_dt,
-                booked=0,
+                weekday=weekday,
+                slot_def_id=slot_def.id,
                 state="1",
             )
             session.add(obj)
             session.commit()
-            logger.info(f"{_rid()}顾问 {advisor.name} 新增时段 {_fmt_dt(start_dt)}~{_fmt_dt(end_dt)}")
+            label = f"{_weekday_label(weekday)} {slot_def.start_clock}-{slot_def.end_clock}"
+            logger.info(f"{_rid()}顾问 {advisor.name} 新增周排期 {label}")
             audit("slot.create", user, info=info, target=f"slot#{obj.id}",
-                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)} 顾问={advisor.name}")
+                  detail=f"{label} 顾问={advisor.name}")
             return _resp(200, "success", {"slotId": obj.id})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1373,7 +1525,7 @@ def _owned_slot(session, advisor: PaAdvisor, slot_id: Any) -> PaSlot | None:
 
 
 def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
-    """修改咨询时段（起止时间）。"""
+    """修改周排期（星期几 / 固定时段）。"""
     user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1386,18 +1538,30 @@ def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
             obj = _owned_slot(session, advisor, data.slot_id)
             if not obj:
                 return _resp(404, "时段不存在")
-            start_dt = _parse_dt(data.start_time)
-            end_dt = _parse_dt(data.end_time)
-            if not start_dt or not end_dt:
-                return _resp(400, "时间格式不合法")
-            if start_dt >= end_dt:
-                return _resp(400, "开始时间需早于结束时间")
-            obj.start_time = start_dt
-            obj.end_time = end_dt
+            slot_def, weekday, err = _resolve_slot_def(session, data.slot_def_id, data.weekday)
+            if not slot_def:
+                return _resp(400, err)
+            exists = _first(session, select(PaSlot).where(
+                PaSlot.advisor_id == advisor.id,
+                PaSlot.weekday == weekday,
+                PaSlot.slot_def_id == slot_def.id,
+                PaSlot.id != obj.id,
+            ))
+            if exists:
+                return _resp(400, "该星期该时段已存在排期")
+            obj.weekday = weekday
+            obj.slot_def_id = slot_def.id
             obj.update_time = datetime.now()
+            # 改到其它星期几后，旧星期的跳过日期不再适用（同星期几的取消记录保持有效）
+            stale = session.execute(select(PaSlotCancel).where(
+                PaSlotCancel.slot_id == obj.id
+            )).scalars().all()
+            for row in stale:
+                if row.occur_date.isoweekday() != weekday:
+                    session.delete(row)
             session.commit()
-            audit("slot.update", user, info=info, target=f"slot#{obj.id}",
-                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)}")
+            label = f"{_weekday_label(weekday)} {slot_def.start_clock}-{slot_def.end_clock}"
+            audit("slot.update", user, info=info, target=f"slot#{obj.id}", detail=label)
             return _resp(200, "success")
         except Exception as e:
             logger.error(f"{_rid()}{e}")
@@ -1406,7 +1570,7 @@ def view_advisor_slot_update(info: Info, data: SlotUpdateInput) -> ApiResponse:
 
 
 def view_advisor_slot_delete(info: Info, data: SlotIdInput) -> ApiResponse:
-    """删除咨询时段：存在有效（booked）预约时拒绝；有历史预约记录时建议改用暂停。"""
+    """删除周排期：存在未来有效预约时拒绝；有历史预约记录时建议改用暂停。"""
     user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1419,9 +1583,11 @@ def view_advisor_slot_delete(info: Info, data: SlotIdInput) -> ApiResponse:
             obj = _owned_slot(session, advisor, data.slot_id)
             if not obj:
                 return _resp(404, "时段不存在")
+            now = datetime.now()
             active = _count(session, select(PaAppointment).where(
                 PaAppointment.slot_id == obj.id,
                 PaAppointment.state == "booked",
+                PaAppointment.start_time >= now,
             ))
             if active > 0:
                 return _resp(403, "该时段存在有效预约，不可删除")
@@ -1431,12 +1597,101 @@ def view_advisor_slot_delete(info: Info, data: SlotIdInput) -> ApiResponse:
             if history > 0:
                 # 已取消/已完成的预约仍引用该时段（外键），删除会破坏历史记录
                 return _resp(403, "该时段存在历史预约记录，不可删除，请使用暂停")
+            slot_def = _first(session, select(PaSlotDef).where(PaSlotDef.id == obj.slot_def_id))
+            label = f"{_weekday_label(obj.weekday)} {slot_def.start_clock}-{slot_def.end_clock}" \
+                if slot_def else f"slot#{obj.id}"
+            session.execute(delete(PaSlotCancel).where(PaSlotCancel.slot_id == obj.id))
             session.execute(delete(PaSlot).where(PaSlot.id == obj.id))
             session.commit()
-            logger.info(f"{_rid()}顾问 {advisor.name} 删除时段 {_fmt_dt(obj.start_time)}")
+            logger.info(f"{_rid()}顾问 {advisor.name} 删除周排期 {label}")
             audit("slot.delete", user, info=info, target=f"slot#{obj.id}",
-                  detail=f"{_fmt_dt(obj.start_time)}~{_fmt_dt(obj.end_time)} 顾问={advisor.name}")
+                  detail=f"{label} 顾问={advisor.name}")
             return _resp(200, "success")
+        except Exception as e:
+            logger.error(f"{_rid()}{e}")
+            session.rollback()
+            return _resp(500, "服务器错误")
+
+
+def view_advisor_slot_cancel(info: Info, data: SlotCancelInput) -> ApiResponse:
+    """取消本周时段（advisor 本人或 admin 代管）：只取消下一次 occurrence。
+
+    周排期序列本身保留；该次已预约学生逐条转为「顾问取消」，并发送
+    cancelled_advisor 模板邮件、抄送顾问本人；与学生取消同约束：
+    开始前 CANCEL_DEADLINE_HOURS 小时内不可取消。
+    """
+    user = _verify_admin_or_advisor(info)
+    if not user:
+        return _resp(401, "Token Error")
+    reason = (data.reason or "").strip()
+    maker = get_session()
+    with maker() as session:
+        try:
+            advisor, err = _resolve_advisor_scope(session, user, data.advisor_id)
+            if not advisor:
+                return _resp(400, err)
+            # 仅取消该周排期「下一次 occurrence」的已预约学生，序列本身保留
+            slot = session.execute(
+                select(PaSlot).where(
+                    PaSlot.id == data.slot_id, PaSlot.advisor_id == advisor.id
+                ).with_for_update()
+            ).scalars().first()
+            if not slot:
+                return _resp(404, "时段不存在")
+            slot_def = _first(session, select(PaSlotDef).where(PaSlotDef.id == slot.slot_def_id))
+            if not slot_def:
+                return _resp(404, "时段定义不存在")
+            now = datetime.now()
+            skipped = _cancelled_dates(session, [slot.id], now.date())
+            occurrence = _next_open_occurrence(slot, slot_def, now, skipped.get(slot.id))
+            if not occurrence:
+                return _resp(400, "时段定义不合法")
+            start_dt, end_dt = occurrence
+            if now >= start_dt - timedelta(hours=CANCEL_DEADLINE_HOURS):
+                return _resp(403, f"咨询开始前 {CANCEL_DEADLINE_HOURS} 小时内不可取消")
+            appts = session.execute(select(PaAppointment).where(
+                PaAppointment.slot_id == slot.id,
+                PaAppointment.state == "booked",
+                PaAppointment.start_time == start_dt,
+            )).scalars().all()
+            cancel_reason = reason or "顾问取消了该时段"
+            for appt in appts:
+                appt.state = "cancelled_advisor"
+                appt.cancel_reason = cancel_reason
+                appt.update_time = now
+            # 记下本次跳过的日期：该日不再放出可约，周排期顺延到下一周
+            session.add(PaSlotCancel(
+                slot_id=slot.id, occur_date=start_dt.date(), reason=cancel_reason,
+            ))
+            slot.update_time = now
+            session.commit()
+            logger.info(
+                f"{_rid()}顾问 {advisor.name} 取消时段 {_fmt_dt(start_dt)}，"
+                f"涉及预约 {len(appts)} 条"
+            )
+            audit("slot.cancel", user, info=info, target=f"slot#{slot.id}",
+                  detail=f"{_fmt_dt(start_dt)}~{_fmt_dt(end_dt)} "
+                         f"顾问={advisor.name} 取消预约数={len(appts)} 原因={cancel_reason}")
+            # 邮件：学生为主收件人、抄送顾问本人（cancelled_advisor 模板独立可配）
+            for appt in appts:
+                student_user = _first(session, select(PaUser).where(
+                    PaUser.id == appt.student_user_id
+                ))
+                if not student_user:
+                    continue
+                _notify_one(
+                    session,
+                    mail_type="cancelled_advisor",
+                    mail_to=student_user.email,
+                    appt=appt,
+                    slot=slot,
+                    advisor_name=advisor.name,
+                    intro="很抱歉，以下朋辈咨询预约因顾问取消时段而取消：",
+                    extra=f"取消原因：{cancel_reason}",
+                    cc=advisor.email,
+                )
+            session.commit()
+            return _resp(200, "success", {"cancelledCount": len(appts)})
         except Exception as e:
             logger.error(f"{_rid()}{e}")
             session.rollback()
@@ -1472,22 +1727,31 @@ def view_advisor_slot_state(info: Info, data: SlotStateInput) -> ApiResponse:
 
 
 # 批量上传模板列名（与 advisorSlotTemplate 下载一致）
-_SLOT_UPLOAD_COLUMNS = ("日期", "开始时间", "结束时间")
+_SLOT_UPLOAD_COLUMNS = ("星期", "开始时间", "结束时间")
+
+# 星期单元格兼容写法（数字 / 星期X / 周X / X）
+_WEEKDAY_ALIASES = {
+    "1": 1, "一": 1, "星期一": 1, "周一": 1, "礼拜一": 1, "monday": 1,
+    "2": 2, "二": 2, "星期二": 2, "周二": 2, "礼拜二": 2, "tuesday": 2,
+    "3": 3, "三": 3, "星期三": 3, "周三": 3, "礼拜三": 3, "wednesday": 3,
+    "4": 4, "四": 4, "星期四": 4, "周四": 4, "礼拜四": 4, "thursday": 4,
+    "5": 5, "五": 5, "星期五": 5, "周五": 5, "礼拜五": 5, "friday": 5,
+    "6": 6, "六": 6, "星期六": 6, "周六": 6, "礼拜六": 6, "saturday": 6,
+    "7": 7, "日": 7, "天": 7, "星期日": 7, "星期天": 7, "周日": 7, "周天": 7,
+    "礼拜日": 7, "礼拜天": 7, "sunday": 7,
+}
 
 
-def _parse_upload_day(value: Any) -> str | None:
-    """解析上传单元格中的日期为 YYYY-MM-DD（兼容 Excel 日期型与文本型）。"""
+def _parse_upload_weekday(value: Any) -> int | None:
+    """解析上传单元格中的星期为 1-7（兼容「星期一/周一/1」及 Excel 数字型）。"""
     if value is None or (not isinstance(value, str) and pd.isna(value)):
         return None
-    if hasattr(value, "strftime") and not isinstance(value, str):
-        try:
-            return value.strftime("%Y-%m-%d")
-        except (ValueError, TypeError):
-            return None
-    m = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", str(value).strip())
-    if not m:
-        return None
-    return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    if isinstance(value, (int, float)) and float(value).is_integer():
+        return int(value) if 1 <= int(value) <= 7 else None
+    text = str(value).strip().lower()
+    if text.endswith(".0"):
+        text = text[:-2]
+    return _WEEKDAY_ALIASES.get(text)
 
 
 def _parse_upload_clock(value: Any) -> str | None:
@@ -1508,11 +1772,37 @@ def _parse_upload_clock(value: Any) -> str | None:
     return f"{hour:02d}:{minute:02d}"
 
 
-def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> ApiResponse:
-    """批量上传排期（.xlsx，列：日期/开始时间/结束时间）。
+def _split_upload_range(start_clock: str, end_clock: str,
+                        defs: dict[str, PaSlotDef]) -> list[PaSlotDef]:
+    """把一段起止时间按 30 分钟切分为固定时段定义列表。
 
-    逐行校验：解析失败/规则不符仅计为失败行并记录原因，不中断整批上传；
-    同顾问同起止时间的时段已存在时视为成功（更新时间戳），否则新增。
+    必须整段对齐且每一段都命中已启用的 pa_slot_def，否则抛 ValueError
+    （错误消息直接回显到批量上传结果）。例如 10:00-11:00 → 2 段。
+    """
+    start_min = _clock_minutes(start_clock)
+    end_min = _clock_minutes(end_clock)
+    if start_min is None or end_min is None or start_min >= end_min:
+        raise ValueError("开始时间需早于结束时间")
+    if (end_min - start_min) % 30 != 0:
+        raise ValueError("时段需按 30 分钟对齐")
+    chunks: list[PaSlotDef] = []
+    cursor = start_min
+    while cursor < end_min:
+        clock = f"{cursor // 60:02d}:{cursor % 60:02d}"
+        slot_def = defs.get(clock)
+        if not slot_def or _clock_minutes(slot_def.end_clock) != cursor + 30:
+            raise ValueError(f"{clock} 不是可用的固定时段（09:00-21:00）")
+        chunks.append(slot_def)
+        cursor += 30
+    return chunks
+
+
+def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> ApiResponse:
+    """批量上传周排期（.xlsx，列：星期/开始时间/结束时间）。
+
+    每行按 30 分钟切分为多个固定时段录入；同一顾问同星期相同时段视为成功
+    （仅更新时间戳）。逐行校验：解析失败/规则不符仅计为失败行并记录原因，
+    不中断整批上传。
     """
     user = _verify_admin_or_advisor(info)
     if not user:
@@ -1542,6 +1832,12 @@ def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> Ap
             if missing:
                 return _resp(400, f"模板列缺失：{'、'.join(missing)}（请下载最新模板）")
 
+            defs = {
+                obj.start_clock: obj
+                for obj in session.execute(
+                    select(PaSlotDef).where(PaSlotDef.state == "1")
+                ).scalars().all()
+            }
             now = datetime.now()
             success_num, fail_num = 0, 0
             errors: list[dict] = []
@@ -1553,32 +1849,29 @@ def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> Ap
                        for v in values):
                     continue
                 try:
-                    day = _parse_upload_day(row.get("日期"))
+                    weekday = _parse_upload_weekday(row.get("星期"))
                     start_clock = _parse_upload_clock(row.get("开始时间"))
                     end_clock = _parse_upload_clock(row.get("结束时间"))
-                    if not day or not start_clock or not end_clock:
-                        raise ValueError("日期/时间格式不合法（日期 YYYY-MM-DD，时间 HH:MM）")
-                    start_dt = datetime.strptime(f"{day} {start_clock}", "%Y-%m-%d %H:%M")
-                    end_dt = datetime.strptime(f"{day} {end_clock}", "%Y-%m-%d %H:%M")
-                    if start_dt >= end_dt:
-                        raise ValueError("开始时间需早于结束时间")
-                    if start_dt <= now:
-                        raise ValueError("只能创建未来的时段")
-                    existing = _first(session, select(PaSlot).where(
-                        PaSlot.advisor_id == advisor.id,
-                        PaSlot.start_time == start_dt,
-                        PaSlot.end_time == end_dt,
-                    ))
-                    if existing:
-                        existing.update_time = now
-                    else:
-                        session.add(PaSlot(
-                            advisor_id=advisor.id,
-                            start_time=start_dt,
-                            end_time=end_dt,
-                            booked=0,
-                            state="1",
+                    if not weekday:
+                        raise ValueError("星期不合法（如：星期一 / 周一 / 1）")
+                    if not start_clock or not end_clock:
+                        raise ValueError("时间格式不合法（HH:MM）")
+                    chunks = _split_upload_range(start_clock, end_clock, defs)
+                    for slot_def in chunks:
+                        existing = _first(session, select(PaSlot).where(
+                            PaSlot.advisor_id == advisor.id,
+                            PaSlot.weekday == weekday,
+                            PaSlot.slot_def_id == slot_def.id,
                         ))
+                        if existing:
+                            existing.update_time = now
+                        else:
+                            session.add(PaSlot(
+                                advisor_id=advisor.id,
+                                weekday=weekday,
+                                slot_def_id=slot_def.id,
+                                state="1",
+                            ))
                     session.commit()
                     success_num += 1
                 except Exception as e:
@@ -1600,16 +1893,15 @@ def view_advisor_slot_batch_upload(info: Info, data: SlotBatchUploadInput) -> Ap
 
 
 def view_advisor_slot_template(info: Info) -> FileResponse:
-    """下载批量排期模板（xlsx：日期/开始时间/结束时间 + 示例行）。"""
+    """下载批量排期模板（xlsx：星期/开始时间/结束时间 + 示例行）。"""
     if not _verify_admin_or_advisor(info):
         return FileResponse(code=401, msg="Token Error")
     try:
         wb = Workbook()
         ws = wb.active
         ws.append(list(_SLOT_UPLOAD_COLUMNS))
-        # 示例行：明天 10:00-11:00
-        sample_day = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        ws.append([sample_day, "10:00", "11:00"])
+        # 示例行：星期一 10:00-11:00（上传时按 30 分钟切分为 2 条）
+        ws.append(["星期一", "10:00", "11:00"])
         _style_header_row(ws, len(_SLOT_UPLOAD_COLUMNS))
         return _workbook_to_file(wb, "SlotTemplate.xlsx")
     except Exception as e:
@@ -1659,8 +1951,8 @@ def _advisor_appointment_item(session, appt: PaAppointment, slot: PaSlot,
         "studentName": appt.student_name,
         "studentNo": appt.student_no,
         "studentEmail": student.email if student else "",
-        "startTime": _fmt_dt(slot.start_time),
-        "endTime": _fmt_dt(slot.end_time),
+        "startTime": _fmt_dt(appt.start_time),
+        "endTime": _fmt_dt(appt.end_time),
         "topic": appt.topic,
         "content": appt.content,
         "mode": appt.mode,
@@ -1669,8 +1961,8 @@ def _advisor_appointment_item(session, appt: PaAppointment, slot: PaSlot,
         "meetingLink": appt.meeting_link,
         "state": appt.state,
         "cancelReason": appt.cancel_reason,
-        "cancelable": _cancelable(appt.state, slot.start_time, now),
-        "completable": _completable(appt.state, slot.start_time, now),
+        "cancelable": _cancelable(appt.state, appt.start_time, now),
+        "completable": _completable(appt.state, appt.start_time, now),
         "hasFeedback": bool(feedback),
         "feedbackSummary": feedback.summary if feedback else "",
         "feedbackHandle": feedback.handle if feedback else "",
@@ -1683,7 +1975,10 @@ def _advisor_appointment_item(session, appt: PaAppointment, slot: PaSlot,
 
 
 def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> ApiResponse:
-    """顾问取消预约（advisor 本人或 admin 代管；须填取消原因；开始前 4 小时内禁止），双方邮件通知。"""
+    """顾问取消预约（advisor 本人或 admin 代管；须填取消原因；开始前 4 小时内禁止）。
+
+    邮件走 cancelled_advisor：发给学生、抄送顾问本人（与取消时段一致）。
+    """
     user = _verify_admin_or_advisor(info)
     if not user:
         return _resp(401, "Token Error")
@@ -1710,30 +2005,31 @@ def view_advisor_appointment_cancel(info: Info, data: AdvisorCancelInput) -> Api
             if not slot:
                 return _resp(404, "时段不存在")
             now = datetime.now()
-            if now >= slot.start_time - timedelta(hours=CANCEL_DEADLINE_HOURS):
+            if now >= appt.start_time - timedelta(hours=CANCEL_DEADLINE_HOURS):
                 return _resp(403, f"咨询开始前 {CANCEL_DEADLINE_HOURS} 小时内不可取消")
             appt.state = "cancelled_advisor"
             appt.cancel_reason = reason
             appt.update_time = now
-            slot.booked = max(slot.booked - 1, 0)
             slot.update_time = now
             session.commit()
             logger.info(f"{_rid()}顾问 {advisor.name} 取消预约 {appt.apply_no}：{reason}")
             audit("appointment.cancel_by_advisor", user, info=info, target=appt.apply_no,
                   detail=f"原因={reason}")
-            _notify_both(
-                session,
-                mail_type="cancelled",
-                appt=appt,
-                slot=slot,
-                advisor_name=advisor.name,
-                intro="以下朋辈咨询预约已由顾问取消：",
-                extra=f"取消原因：{reason}",
-                student_user=_first(session, select(PaUser).where(
-                    PaUser.id == appt.student_user_id
-                )),
-                advisor_email=advisor.email,
-            )
+            student_user = _first(session, select(PaUser).where(
+                PaUser.id == appt.student_user_id
+            ))
+            if student_user:
+                _notify_one(
+                    session,
+                    mail_type="cancelled_advisor",
+                    mail_to=student_user.email,
+                    appt=appt,
+                    slot=slot,
+                    advisor_name=advisor.name,
+                    intro="以下朋辈咨询预约已由顾问取消：",
+                    extra=f"取消原因：{reason}",
+                    cc=advisor.email,
+                )
             session.commit()
             return _resp(200, "取消成功")
         except Exception as e:
@@ -1762,7 +2058,7 @@ def view_advisor_appointment_complete(info: Info, data: AdvisorCompleteInput) ->
             if appt.state != "booked":
                 return _resp(403, "当前状态不可标记完成")
             slot = _first(session, select(PaSlot).where(PaSlot.id == appt.slot_id))
-            if not slot or datetime.now() < slot.start_time:
+            if not slot or datetime.now() < appt.start_time:
                 return _resp(403, "咨询开始时间未到，不可标记完成")
             appt.state = "completed"
             appt.update_time = datetime.now()
@@ -1820,9 +2116,12 @@ def view_feedback_set(info: Info, data: FeedbackSetInput) -> ApiResponse:
 
 
 def _append_appointment_rows(session, ws, rows) -> None:
-    """预约导出公共行写入（rows 为 (appointment, slot) 列表，恒含顾问列）。"""
+    """预约导出公共行写入（rows 为 (appointment, slot) 列表，恒含顾问列）。
+
+    起止时间取预约快照（appt.start_time/end_time），不依赖排期行。
+    """
     row_num = 0
-    for appt, slot in rows:
+    for appt, _slot in rows:
         row_num += 1
         advisor = _first(session, select(PaAdvisor).where(PaAdvisor.id == appt.advisor_id))
         values = [row_num, appt.apply_no, advisor.name if advisor else "N/A"]
@@ -1831,8 +2130,8 @@ def _append_appointment_rows(session, ws, rows) -> None:
             appt.student_name,
             appt.student_no,
             student.email if student else "",
-            _fmt_dt(slot.start_time),
-            _fmt_dt(slot.end_time),
+            _fmt_dt(appt.start_time),
+            _fmt_dt(appt.end_time),
             appt.topic,
             appt.content,
             _mode_label(appt.mode),
@@ -1869,12 +2168,13 @@ def view_advisor_appointment_list(info: Info, data: ManageAppointmentListInput) 
                 day = _day_range(data.date)
                 if not day:
                     return _resp(400, "日期格式不合法（YYYY-MM-DD）")
-                query = query.where(PaSlot.start_time >= day[0], PaSlot.start_time < day[1])
+                query = query.where(PaAppointment.start_time >= day[0],
+                                    PaAppointment.start_time < day[1])
             if data.state in VALID_APPOINTMENT_STATES:
                 query = query.where(PaAppointment.state == data.state)
             total = _count(session, query)
             rows = session.execute(
-                query.order_by(desc(PaSlot.start_time), desc(PaAppointment.id))
+                query.order_by(desc(PaAppointment.start_time), desc(PaAppointment.id))
                 .offset((page - 1) * page_size).limit(page_size)
             ).all()
             detail = [
@@ -2279,12 +2579,13 @@ def view_manage_appointment_list(info: Info, data: ManageAppointmentListInput) -
                 day = _day_range(data.date)
                 if not day:
                     return _resp(400, "日期格式不合法（YYYY-MM-DD）")
-                query = query.where(PaSlot.start_time >= day[0], PaSlot.start_time < day[1])
+                query = query.where(PaAppointment.start_time >= day[0],
+                                    PaAppointment.start_time < day[1])
             if data.state in VALID_APPOINTMENT_STATES:
                 query = query.where(PaAppointment.state == data.state)
             total = _count(session, query)
             rows = session.execute(
-                query.order_by(desc(PaSlot.start_time), desc(PaAppointment.id))
+                query.order_by(desc(PaAppointment.start_time), desc(PaAppointment.id))
                 .offset((page - 1) * page_size).limit(page_size)
             ).all()
             detail = []
@@ -2326,14 +2627,15 @@ def view_manage_feedback_list(info: Info, data: ManageFeedbackListInput) -> ApiR
                 rng = _month_range(data.month)
                 if not rng:
                     return _resp(400, "月份格式不合法（YYYY-MM）")
-                query = query.where(PaSlot.start_time >= rng[0], PaSlot.start_time < rng[1])
+                query = query.where(PaAppointment.start_time >= rng[0],
+                                   PaAppointment.start_time < rng[1])
             total = _count(session, query)
             rows = session.execute(
-                query.order_by(desc(PaSlot.start_time), desc(PaFeedback.id))
+                query.order_by(desc(PaAppointment.start_time), desc(PaFeedback.id))
                 .offset((page - 1) * page_size).limit(page_size)
             ).all()
             detail = []
-            for feedback, appt, slot in rows:
+            for feedback, appt, _slot in rows:
                 advisor = _first(session, select(PaAdvisor).where(
                     PaAdvisor.id == feedback.advisor_id
                 ))
@@ -2344,7 +2646,7 @@ def view_manage_feedback_list(info: Info, data: ManageFeedbackListInput) -> ApiR
                     "advisorName": advisor.name if advisor else "N/A",
                     "studentName": appt.student_name,
                     "studentNo": appt.student_no,
-                    "startTime": _fmt_dt(slot.start_time),
+                    "startTime": _fmt_dt(appt.start_time),
                     "topic": appt.topic,
                     "summary": feedback.summary,
                     "handle": feedback.handle,
@@ -2477,9 +2779,10 @@ def _filtered_appointment_rows(session, advisor_id: Any, month: str):
         rng = _month_range(month)
         if not rng:
             return None, "月份格式不合法（YYYY-MM）"
-        query = query.where(PaSlot.start_time >= rng[0], PaSlot.start_time < rng[1])
+        query = query.where(PaAppointment.start_time >= rng[0],
+                            PaAppointment.start_time < rng[1])
     rows = session.execute(
-        query.order_by(desc(PaSlot.start_time), desc(PaAppointment.id))
+        query.order_by(desc(PaAppointment.start_time), desc(PaAppointment.id))
     ).all()
     return rows, ""
 
@@ -2543,9 +2846,10 @@ def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResp
                 rng = _month_range(data.month)
                 if not rng:
                     return FileResponse(code=400, msg="月份格式不合法（YYYY-MM）")
-                query = query.where(PaSlot.start_time >= rng[0], PaSlot.start_time < rng[1])
+                query = query.where(PaAppointment.start_time >= rng[0],
+                                   PaAppointment.start_time < rng[1])
             rows = session.execute(
-                query.order_by(desc(PaSlot.start_time), desc(PaFeedback.id))
+                query.order_by(desc(PaAppointment.start_time), desc(PaFeedback.id))
             ).all()
             wb = Workbook()
             ws = wb.active
@@ -2553,7 +2857,7 @@ def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResp
                       "咨询主题", "咨询总结", "处理方式", "是否跟进", "填写时间"]
             ws.append(header)
             row_num = 0
-            for feedback, appt, slot in rows:
+            for feedback, appt, _slot in rows:
                 advisor = _first(session, select(PaAdvisor).where(
                     PaAdvisor.id == feedback.advisor_id
                 ))
@@ -2564,7 +2868,7 @@ def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResp
                     advisor.name if advisor else "N/A",
                     appt.student_name,
                     appt.student_no,
-                    _fmt_dt(slot.start_time),
+                    _fmt_dt(appt.start_time),
                     appt.topic,
                     feedback.summary,
                     feedback.handle,
@@ -2582,7 +2886,7 @@ def view_manage_feedback_export(info: Info, data: ManageExportInput) -> FileResp
 
 
 def view_manage_mail_template_list(info: Info) -> ApiResponse:
-    """邮件模板列表（仅 admin，模板为全局配置非顾问个人数据）：四类模板全量返回，缺失类型以内置默认补齐展示。"""
+    """邮件模板列表（仅 admin，模板为全局配置非顾问个人数据）：五类模板全量返回，缺失类型以内置默认补齐展示。"""
     if not _verify_admin(info):
         return _resp(401, "Token Error")
     maker = get_session()
@@ -2615,7 +2919,7 @@ def view_manage_mail_template_update(info: Info, data: ManageMailTemplateUpdateI
     subject = data.subject.strip()
     html = data.html.strip()
     if mail_type not in DEFAULT_TEMPLATES:
-        return _resp(400, "邮件类型不合法（booked_student/booked_advisor/reminder/cancelled）")
+        return _resp(400, "邮件类型不合法（booked_student/booked_advisor/reminder/cancelled/cancelled_advisor）")
     if not subject or not html:
         return _resp(400, "主题与正文均不能为空")
     maker = get_session()

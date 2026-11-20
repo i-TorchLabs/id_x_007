@@ -267,7 +267,7 @@ export default function AdvisorBrowseView() {
                 <div className="mt-3 flex flex-wrap gap-1">
                   {(adv.slots || []).slice(0, 4).map((s) => (
                     <Chip key={s.slotId} className="text-xs">
-                      {s.startTime}
+                      {s.weekdayLabel} {s.startClock}
                     </Chip>
                   ))}
                   {(adv.slots || []).length === 0 && (
@@ -330,8 +330,10 @@ export default function AdvisorBrowseView() {
                                 : "border-gray-300 hover:border-[#5b2a86]"
                           }`}
                         >
-                          <div>{s.startTime}</div>
-                          <div>~ {s.endTime}</div>
+                          <div className="font-bold">
+                            {s.weekdayLabel} {s.startClock}-{s.endClock}
+                          </div>
+                          <div>{s.startTime.split(" ")[0]}</div>
                           <div className="mt-1">
                             {full ? t("full") : t("available")}
                           </div>

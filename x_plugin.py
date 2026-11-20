@@ -65,15 +65,21 @@ class _Idx007Plugin:
 
     async def build_tables(self, conn: AsyncConnection) -> None:
         await conn.run_sync(self.base.metadata.create_all)
-        # 建表后播种初始管理员、默认邮件模板、SSO 与 SMTP 配置（均幂等；
-        # 外部数据库不执行 ops/init/*.sql，预置数据与结构迁移全靠此处兜底）
+        # 建表后播种初始管理员、固定时段定义、默认邮件模板、SSO 与 SMTP 配置
+        # （均幂等；外部数据库不执行 ops/init/*.sql，预置数据与结构迁移全靠此处兜底）
         from x_models.id_x_007.src.models.x_models import (
             migrate_advisor_drop_username,
+            migrate_slots_to_weekly,
             seed_default_mail_templates,
             seed_initial_admin,
+            seed_slot_defs,
             seed_smtp_settings,
             seed_sso_settings,
         )
+        # 固定时段定义来自 ops/init/05_slot.sql（24 段 × 30 分钟），不写死在代码中
+        await conn.run_sync(seed_slot_defs)
+        # 旧版「日期排期」收敛为「星期 + 固定时段」周排期（新库自动跳过）
+        await conn.run_sync(migrate_slots_to_weekly)
         # 历史库结构收敛：pa_advisor 删除 username 列，email 即登录账号
         await conn.run_sync(migrate_advisor_drop_username)
         await conn.run_sync(seed_initial_admin)

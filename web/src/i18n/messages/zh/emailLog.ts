@@ -10,14 +10,16 @@ export default {
     bookedStudent: "预约成功确认（学生）",
     bookedAdvisor: "预约成功确认（顾问）",
     reminder: "预约提醒（双方）",
-    cancelled: "取消预约（双方）",
+    cancelled: "取消预约（学生）",
+    cancelledAdvisor: "取消预约（顾问）",
   },
   // 模板下拉展示名（括号内为触发时点）
   templateType: {
     bookedStudent: "预约成功确认（学生）",
     bookedAdvisor: "预约成功确认（顾问）",
     reminder: "预约提醒（双方）",
-    cancelled: "取消预约（双方）",
+    cancelled: "取消预约（学生）",
+    cancelledAdvisor: "取消预约（顾问）",
   },
   status: {
     sent: "已发送",

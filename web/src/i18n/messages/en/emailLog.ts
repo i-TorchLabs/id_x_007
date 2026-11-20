@@ -11,13 +11,15 @@ export default {
     bookedAdvisor: "New Booking",
     reminder: "Day-before Reminder",
     cancelled: "Student Cancelled",
+    cancelledAdvisor: "Cancelled by Consultant",
   },
   // Template dropdown labels (trigger timing in parentheses)
   templateType: {
     bookedStudent: "Booking Confirmed (to student, on booking)",
     bookedAdvisor: "New Booking (to consultant, on booking)",
     reminder: "Day-before Reminder (21:00 the day before, both)",
-    cancelled: "Student Cancelled (on cancellation, both)",
+    cancelled: "Student Cancelled (to student, on cancellation)",
+    cancelledAdvisor: "Cancelled by Consultant (to student, cc consultant)",
   },
   status: {
     sent: "Sent",

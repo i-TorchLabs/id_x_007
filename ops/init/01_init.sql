@@ -76,23 +76,44 @@ COMMENT ON COLUMN pa_advisor_allow.allow IS '允许（FALSE 时等同不在白�
 COMMENT ON COLUMN pa_advisor_allow.create_time IS '创建时间';
 COMMENT ON COLUMN pa_advisor_allow.update_time IS '更新时间';
 
--- 咨询时段表
-CREATE TABLE IF NOT EXISTS pa_slot (
+-- 固定时段定义表（slot-01 ~ slot-24，每段 30 分钟）
+-- 预置数据见 ops/init/05_slot.sql（应用启动时 seed_slot_defs 幂等读取执行）
+CREATE TABLE IF NOT EXISTS pa_slot_def (
     id          SERIAL PRIMARY KEY,
-    advisor_id  INTEGER      NOT NULL REFERENCES pa_advisor (id),
-    start_time  TIMESTAMP    NOT NULL,
-    end_time    TIMESTAMP    NOT NULL,
-    booked      INTEGER      NOT NULL DEFAULT 0,
+    code        VARCHAR(32)  NOT NULL UNIQUE,
+    start_clock VARCHAR(5)   NOT NULL,
+    end_clock   VARCHAR(5)   NOT NULL,
+    sort_no     INTEGER      NOT NULL DEFAULT 0,
     state       VARCHAR(255) NOT NULL DEFAULT '1',
     create_time TIMESTAMP    NULL DEFAULT NOW(),
     update_time TIMESTAMP    NULL DEFAULT NOW()
 );
-COMMENT ON TABLE pa_slot IS '咨询时段表';
+COMMENT ON TABLE pa_slot_def IS '固定时段定义表（30 分钟粒度）';
+COMMENT ON COLUMN pa_slot_def.id IS 'ID';
+COMMENT ON COLUMN pa_slot_def.code IS '时段编码（slot-01 ~ slot-24）';
+COMMENT ON COLUMN pa_slot_def.start_clock IS '开始时刻（HH:MM）';
+COMMENT ON COLUMN pa_slot_def.end_clock IS '结束时刻（HH:MM）';
+COMMENT ON COLUMN pa_slot_def.sort_no IS '排序号';
+COMMENT ON COLUMN pa_slot_def.state IS '状态(1启用/0停用)';
+COMMENT ON COLUMN pa_slot_def.create_time IS '创建时间';
+COMMENT ON COLUMN pa_slot_def.update_time IS '更新时间';
+
+-- 周排期表：顾问 × 星期几 × 固定时段（不存具体日期，按自然周自动循环生效）
+CREATE TABLE IF NOT EXISTS pa_slot (
+    id          SERIAL PRIMARY KEY,
+    advisor_id  INTEGER      NOT NULL REFERENCES pa_advisor (id),
+    weekday     INTEGER      NOT NULL,
+    slot_def_id INTEGER      NOT NULL REFERENCES pa_slot_def (id),
+    state       VARCHAR(255) NOT NULL DEFAULT '1',
+    create_time TIMESTAMP    NULL DEFAULT NOW(),
+    update_time TIMESTAMP    NULL DEFAULT NOW(),
+    CONSTRAINT pa_slot_uniq_weekly UNIQUE (advisor_id, weekday, slot_def_id)
+);
+COMMENT ON TABLE pa_slot IS '周排期表（按星期循环）';
 COMMENT ON COLUMN pa_slot.id IS 'ID';
 COMMENT ON COLUMN pa_slot.advisor_id IS '顾问ID';
-COMMENT ON COLUMN pa_slot.start_time IS '开始时间';
-COMMENT ON COLUMN pa_slot.end_time IS '结束时间';
-COMMENT ON COLUMN pa_slot.booked IS '已订数';
+COMMENT ON COLUMN pa_slot.weekday IS '星期几（1周一...7周日）';
+COMMENT ON COLUMN pa_slot.slot_def_id IS '时段定义ID';
 COMMENT ON COLUMN pa_slot.state IS '状态(1开放/0暂停)';
 COMMENT ON COLUMN pa_slot.create_time IS '创建时间';
 COMMENT ON COLUMN pa_slot.update_time IS '更新时间';
@@ -102,6 +123,9 @@ CREATE TABLE IF NOT EXISTS pa_appointment (
     id              SERIAL PRIMARY KEY,
     apply_no        VARCHAR(255) NOT NULL UNIQUE,
     slot_id         INTEGER      NOT NULL REFERENCES pa_slot (id),
+    book_date       DATE         NOT NULL,
+    start_time      TIMESTAMP    NOT NULL,
+    end_time        TIMESTAMP    NOT NULL,
     advisor_id      INTEGER      NOT NULL,
     student_user_id INTEGER      NOT NULL,
     student_name    VARCHAR(255) NOT NULL DEFAULT 'N/A',
@@ -120,7 +144,10 @@ CREATE TABLE IF NOT EXISTS pa_appointment (
 COMMENT ON TABLE pa_appointment IS '预约记录表';
 COMMENT ON COLUMN pa_appointment.id IS 'ID';
 COMMENT ON COLUMN pa_appointment.apply_no IS '预约单号（A+8位数字）';
-COMMENT ON COLUMN pa_appointment.slot_id IS '时段ID';
+COMMENT ON COLUMN pa_appointment.slot_id IS '周排期ID';
+COMMENT ON COLUMN pa_appointment.book_date IS '预约日期（具体某一周的第几天）';
+COMMENT ON COLUMN pa_appointment.start_time IS '开始时间（预约日期+时段定义，落库快照）';
+COMMENT ON COLUMN pa_appointment.end_time IS '结束时间（预约日期+时段定义，落库快照）';
 COMMENT ON COLUMN pa_appointment.advisor_id IS '顾问ID';
 COMMENT ON COLUMN pa_appointment.student_user_id IS '学生用户ID';
 COMMENT ON COLUMN pa_appointment.student_name IS '学生姓名';
@@ -135,6 +162,25 @@ COMMENT ON COLUMN pa_appointment.state IS '状态(booked已预约/cancelled_stud
 COMMENT ON COLUMN pa_appointment.cancel_reason IS '取消原因（顾问取消时必填）';
 COMMENT ON COLUMN pa_appointment.create_time IS '创建时间';
 COMMENT ON COLUMN pa_appointment.update_time IS '更新时间';
+
+-- 预约按具体起止时间查询/导出/提醒，建索引
+CREATE INDEX IF NOT EXISTS pa_appointment_start_time_idx ON pa_appointment (start_time);
+
+-- 周排期跳过记录表：顾问「取消本次」后该日期不再放出可约，序列顺延到下一周
+CREATE TABLE IF NOT EXISTS pa_slot_cancel (
+    id          SERIAL PRIMARY KEY,
+    slot_id     INTEGER   NOT NULL REFERENCES pa_slot (id) ON DELETE CASCADE,
+    occur_date  DATE      NOT NULL,
+    reason      TEXT      NOT NULL DEFAULT '',
+    create_time TIMESTAMP NULL DEFAULT NOW(),
+    CONSTRAINT pa_slot_cancel_uniq UNIQUE (slot_id, occur_date)
+);
+COMMENT ON TABLE pa_slot_cancel IS '周排期跳过记录表（取消某一次 occurrence）';
+COMMENT ON COLUMN pa_slot_cancel.id IS 'ID';
+COMMENT ON COLUMN pa_slot_cancel.slot_id IS '周排期ID';
+COMMENT ON COLUMN pa_slot_cancel.occur_date IS '被跳过的日期';
+COMMENT ON COLUMN pa_slot_cancel.reason IS '取消原因';
+COMMENT ON COLUMN pa_slot_cancel.create_time IS '创建时间';
 
 -- 咨询反馈表
 CREATE TABLE IF NOT EXISTS pa_feedback (
@@ -172,7 +218,7 @@ CREATE TABLE IF NOT EXISTS pa_email_log (
 COMMENT ON TABLE pa_email_log IS '邮件发送日志表';
 COMMENT ON COLUMN pa_email_log.id IS 'ID';
 COMMENT ON COLUMN pa_email_log.mail_to IS '收件人';
-COMMENT ON COLUMN pa_email_log.mail_type IS '邮件类型(booked_student预约成功确认/booked_advisor新预约通知/reminder次日提醒/cancelled取消通知)';
+COMMENT ON COLUMN pa_email_log.mail_type IS '邮件类型(booked_student预约成功确认/booked_advisor新预约通知/reminder次日提醒/cancelled取消预约·学生/cancelled_advisor顾问取消时段通知)';
 COMMENT ON COLUMN pa_email_log.subject IS '主题';
 COMMENT ON COLUMN pa_email_log.content IS '正文';
 COMMENT ON COLUMN pa_email_log.status IS '状态(sent已发送/failed失败/skipped未配置跳过)';
@@ -191,7 +237,7 @@ CREATE TABLE IF NOT EXISTS pa_mail_template (
 );
 COMMENT ON TABLE pa_mail_template IS '邮件模板表';
 COMMENT ON COLUMN pa_mail_template.id IS 'ID';
-COMMENT ON COLUMN pa_mail_template.mail_type IS '邮件类型(booked_student预约成功确认/booked_advisor新预约通知/reminder次日提醒/cancelled取消通知)';
+COMMENT ON COLUMN pa_mail_template.mail_type IS '邮件类型(booked_student预约成功确认/booked_advisor新预约通知/reminder次日提醒/cancelled取消预约·学生/cancelled_advisor顾问取消时段通知)';
 COMMENT ON COLUMN pa_mail_template.subject IS '主题模板（支持 {apply_no} 等占位符）';
 COMMENT ON COLUMN pa_mail_template.html IS '正文 HTML 模板（支持 {apply_no} 等占位符）';
 COMMENT ON COLUMN pa_mail_template.create_time IS '创建时间';

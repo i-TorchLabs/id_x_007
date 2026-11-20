@@ -129,29 +129,36 @@ class AdvisorPageInput:
 
 @strawberry.input
 class SlotCreateInput:
-    start_time: str = strawberry.field(description="开始时间（毫秒时间戳或 YYYY-MM-DD HH:MM）")
-    end_time: str = strawberry.field(description="结束时间（毫秒时间戳或 YYYY-MM-DD HH:MM）")
+    weekday: int = strawberry.field(description="星期几（1周一...7周日）")
+    slot_def_id: int = strawberry.field(description="时段定义ID（slotDefList 返回）")
     advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管必填；advisor 本人可不传）")
 
 
 @strawberry.input
 class SlotUpdateInput:
-    slot_id: int = strawberry.field(description="时段ID")
-    start_time: str = strawberry.field(description="开始时间（毫秒时间戳或 YYYY-MM-DD HH:MM）")
-    end_time: str = strawberry.field(description="结束时间（毫秒时间戳或 YYYY-MM-DD HH:MM）")
+    slot_id: int = strawberry.field(description="周排期ID")
+    weekday: int = strawberry.field(description="星期几（1周一...7周日）")
+    slot_def_id: int = strawberry.field(description="时段定义ID（slotDefList 返回）")
     advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管必填；advisor 本人可不传）")
 
 
 @strawberry.input
 class SlotIdInput:
-    slot_id: int = strawberry.field(description="时段ID")
+    slot_id: int = strawberry.field(description="周排期ID")
     advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管必填；advisor 本人可不传）")
 
 
 @strawberry.input
 class SlotStateInput:
-    slot_id: int = strawberry.field(description="时段ID")
+    slot_id: int = strawberry.field(description="周排期ID")
     state: str = strawberry.field(description="状态（1开放/0暂停）")
+    advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管必填；advisor 本人可不传）")
+
+
+@strawberry.input
+class SlotCancelInput:
+    slot_id: int = strawberry.field(description="周排期ID（取消其下一次 occurrence）")
+    reason: str = strawberry.field(default="", description="取消原因（可选，随邮件告知学生）")
     advisor_id: int = strawberry.field(default=0, description="顾问ID（admin 代管必填；advisor 本人可不传）")
 
 

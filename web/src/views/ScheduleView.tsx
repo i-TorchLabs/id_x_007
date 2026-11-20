@@ -2,33 +2,46 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { AlertDialog, Button, Modal, Table, toast } from "@heroui/react";
+import { AlertDialog, Button, Chip, Modal, Table, toast } from "@heroui/react";
 import {
   advisorAcceptingSetApi,
   advisorMySlotListApi,
   advisorSlotBatchUploadApi,
+  advisorSlotCancelApi,
   advisorSlotCreateApi,
+  advisorSlotDefListApi,
   advisorSlotDeleteApi,
   advisorSlotStateApi,
   advisorSlotTemplateApi,
   advisorSlotUpdateApi,
   type MySlot,
   type SlotBatchUploadRes,
+  type SlotDef,
   type SlotFormValue,
 } from "@/api/advisor";
 import Paginator from "@/components/pa/Paginator";
 import { SlotStateChip } from "@/components/pa/StateChip";
-import FormField from "@/components/pa/FormField";
 import SwitchField from "@/components/pa/SwitchField";
+import SelectField from "@/components/pa/SelectField";
 import { downloadBase64 } from "@/utils/download";
-import { isTrue, msToLocal } from "@/utils/format";
+import { isTrue } from "@/utils/format";
 
 const PAGE_SIZE = 20;
 
+/** 取消截止（小时）：开始前 4 小时内不可取消（与后端 CANCEL_DEADLINE_HOURS 一致，后端仍兜底校验） */
+const CANCEL_DEADLINE_HOURS = 4;
+
+/** 时段是否仍可取消：距开始 > 4 小时 */
+const slotCancelable = (row: MySlot) =>
+  Date.now() < Number(row.startTimeMs) - CANCEL_DEADLINE_HOURS * 3600 * 1000;
+
 const emptyForm: SlotFormValue = {
-  start_time: "",
-  end_time: "",
+  weekday: "1",
+  slotDefId: "",
 };
+
+/** 星期选项（1=周一 ... 7=周日，与后端 weekday 对齐） */
+const WEEKDAY_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 
 interface ScheduleViewProps {
   /** admin 代管（D-2）时传目标顾问 id；advisor 本人（C-1）留空（接口层转 0） */
@@ -52,7 +65,11 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
   const [formValue, setFormValue] = useState<SlotFormValue>(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<MySlot | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<MySlot | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
   const [uploadResult, setUploadResult] = useState<SlotBatchUploadRes | null>(null);
+  const [slotDefs, setSlotDefs] = useState<SlotDef[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getData = useCallback(
@@ -77,6 +94,13 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [advisorId]);
 
+  useEffect(() => {
+    advisorSlotDefListApi()
+      .then((res) => setSlotDefs(res.list || []))
+      .catch((error) => toast.danger((error as Error).message || t("loadFail")));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
     getData(newPage);
@@ -86,10 +110,9 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
     if (row) {
       setIsEdit(true);
       setEditId(row.slotId);
-      // 编辑回填用数值毫秒字段（展示字段为格式化字符串，不可逆转）
       setFormValue({
-        start_time: msToLocal(row.startTimeMs),
-        end_time: msToLocal(row.endTimeMs),
+        weekday: String(row.weekday),
+        slotDefId: String(row.slotDefId),
       });
     } else {
       setIsEdit(false);
@@ -100,12 +123,8 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
   };
 
   const handleSubmit = async () => {
-    if (!formValue.start_time || !formValue.end_time) {
-      toast.danger(t("timeRequired"));
-      return;
-    }
-    if (formValue.end_time <= formValue.start_time) {
-      toast.danger(t("endAfterStart"));
+    if (!formValue.weekday || !formValue.slotDefId) {
+      toast.danger(t("slotRequired"));
       return;
     }
     setSubmitting(true);
@@ -148,6 +167,26 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
     }
   };
 
+  const closeCancelDialog = () => {
+    setCancelTarget(null);
+    setCancelReason("");
+  };
+
+  // 取消时段：已预约学生逐条取消并邮件通知（抄送顾问本人）；4 小时截止由后端兜底
+  const handleCancelSlot = async () => {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    try {
+      const res = await advisorSlotCancelApi(cancelTarget.slotId, cancelReason.trim(), advisorId);
+      toast.success(t("slotCancelled", { count: Number(res?.cancelledCount) || 0 }));
+      closeCancelDialog();
+      getData();
+    } catch (error) {
+      toast.danger((error as Error).message || t("cancelSlotFail"));
+    }
+    setCancelling(false);
+  };
+
   const handleDownloadTemplate = async () => {
     try {
       const res = await advisorSlotTemplateApi();
@@ -188,8 +227,9 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
   const totalPages = Math.max(1, Math.ceil(itemCount / PAGE_SIZE));
 
   const columns = [
-    { id: "startTime", name: t("startTime") },
-    { id: "endTime", name: t("endTime") },
+    { id: "weekday", name: t("weekday") },
+    { id: "startClock", name: t("startTime") },
+    { id: "endClock", name: t("endTime") },
     { id: "booked", name: t("bookedState") },
     { id: "state", name: t("state") },
     { id: "actions", name: t("options") },
@@ -239,14 +279,20 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
                 <Table.Row id={row.slotId} columns={columns}>
                   {(column: { id: string; name: string }) => {
                     switch (column.id) {
-                      case "startTime":
-                        return <Table.Cell>{row.startTime}</Table.Cell>;
-                      case "endTime":
-                        return <Table.Cell>{row.endTime}</Table.Cell>;
+                      case "weekday":
+                        return <Table.Cell>{row.weekdayLabel}</Table.Cell>;
+                      case "startClock":
+                        return <Table.Cell>{row.startClock}</Table.Cell>;
+                      case "endClock":
+                        return <Table.Cell>{row.endClock}</Table.Cell>;
                       case "booked":
                         return (
                           <Table.Cell>
-                            {Number(row.booked) > 0 ? t("slotBooked") : t("slotAvailable")}
+                            {Number(row.booked) > 0 ? (
+                              <Chip color="warning">{t("slotBooked")}</Chip>
+                            ) : (
+                              <Chip color="success">{t("slotAvailable")}</Chip>
+                            )}
                           </Table.Cell>
                         );
                       case "state":
@@ -285,6 +331,15 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
                             <Button
                               size="sm"
                               variant="danger"
+                              className="mr-2"
+                              isDisabled={!slotCancelable(row)}
+                              onPress={() => setCancelTarget(row)}
+                            >
+                              {t("cancelSlot")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
                               onPress={() => setDeleteTarget(row)}
                             >
                               {t("delete")}
@@ -314,17 +369,26 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
               </Modal.Header>
               <Modal.Body>
                 <div className="flex flex-col gap-4">
-                  <FormField
-                    label={t("startTime")}
-                    type="datetime-local"
-                    value={formValue.start_time}
-                    onChange={(v) => setFormValue((s) => ({ ...s, start_time: v }))}
+                  <SelectField
+                    label={t("weekday")}
+                    value={formValue.weekday}
+                    options={WEEKDAY_OPTIONS.map((wd) => ({
+                      value: String(wd),
+                      label: t(`weekday${wd}`),
+                    }))}
+                    onChange={(v) => setFormValue((s) => ({ ...s, weekday: v }))}
+                    className="w-56"
                   />
-                  <FormField
-                    label={t("endTime")}
-                    type="datetime-local"
-                    value={formValue.end_time}
-                    onChange={(v) => setFormValue((s) => ({ ...s, end_time: v }))}
+                  <SelectField
+                    label={t("slotRange")}
+                    value={formValue.slotDefId}
+                    options={slotDefs.map((def) => ({
+                      value: String(def.slotDefId),
+                      label: `${def.startClock}-${def.endClock}（${def.code}）`,
+                    }))}
+                    onChange={(v) => setFormValue((s) => ({ ...s, slotDefId: v }))}
+                    placeholder={t("slotPlaceholder")}
+                    className="w-72"
                   />
                 </div>
               </Modal.Body>
@@ -372,6 +436,54 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
         </Modal.Backdrop>
       </Modal>
 
+      {/* 取消时段：已预约学生逐条取消并邮件告知（抄送顾问本人），原因选填 */}
+      <AlertDialog
+        isOpen={!!cancelTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeCancelDialog();
+          }
+        }}
+      >
+        <AlertDialog.Backdrop>
+          <AlertDialog.Container placement="center">
+            <AlertDialog.Dialog>
+              <AlertDialog.Header>
+                <AlertDialog.Icon status="warning" />
+                <AlertDialog.Heading>{t("confirmCancelSlot")}</AlertDialog.Heading>
+              </AlertDialog.Header>
+              <AlertDialog.Body>
+                <div className="mb-2">
+                  {t("cancelSlotRange", {
+                    weekday: cancelTarget?.weekdayLabel ?? "",
+                    date: (cancelTarget?.startTime ?? "").split(" ")[0],
+                    start: cancelTarget?.startClock ?? "",
+                    end: cancelTarget?.endClock ?? "",
+                  })}{" "}
+                  {Number(cancelTarget?.booked) > 0
+                    ? t("cancelSlotNotify", { count: Number(cancelTarget?.booked) })
+                    : t("cancelSlotNoBooking")}
+                </div>
+                <textarea
+                  className="w-full h-20 rounded-lg border border-gray-300 p-2 text-sm"
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder={t("cancelSlotReasonPlaceholder")}
+                />
+              </AlertDialog.Body>
+              <AlertDialog.Footer>
+                <Button variant="ghost" onPress={closeCancelDialog}>
+                  {t("back")}
+                </Button>
+                <Button variant="danger" isPending={cancelling} onPress={handleCancelSlot}>
+                  {t("cancelSlot")}
+                </Button>
+              </AlertDialog.Footer>
+            </AlertDialog.Dialog>
+          </AlertDialog.Container>
+        </AlertDialog.Backdrop>
+      </AlertDialog>
+
       <AlertDialog isOpen={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialog.Backdrop>
           <AlertDialog.Container placement="center">
@@ -382,8 +494,9 @@ export default function ScheduleView({ advisorId = "", onPreview }: ScheduleView
               </AlertDialog.Header>
               <AlertDialog.Body>
                 {t("deleteSlotRange", {
-                  start: deleteTarget?.startTime ?? "",
-                  end: deleteTarget?.endTime ?? "",
+                  weekday: deleteTarget?.weekdayLabel ?? "",
+                  start: deleteTarget?.startClock ?? "",
+                  end: deleteTarget?.endClock ?? "",
                 })}{" "}
                 {t("deleteConstraint")}
               </AlertDialog.Body>

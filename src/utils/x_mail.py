@@ -51,14 +51,18 @@ def _smtp_config(session) -> dict[str, str]:
 
 
 def send_mail(session, mail_to: str, mail_type: str, subject: str, content: str,
-              appointment_id: int | None = None) -> str:
+              appointment_id: int | None = None, cc: str = "") -> str:
     """发送邮件并写 pa_email_log（由调用方 commit），返回落库状态。
 
-    - mail_type：booked_student / booked_advisor / reminder / cancelled；
+    - mail_type：booked_student / booked_advisor / reminder / cancelled / cancelled_advisor；
+    - cc：抄送地址（可选，非法或为空时忽略；落库 mail_to 仅记主收件人）；
     - 收件人为空或 SMTP 未配置：status="skipped"；
     - SMTP 异常：status="failed"，error 记录异常摘要。
     """
     mail_to = _sanitize_header(mail_to)
+    cc = _sanitize_header(cc)
+    if "@" not in cc or cc == mail_to:
+        cc = ""
     subject = _sanitize_header(subject)
     cfg = _smtp_config(session)
 
@@ -74,11 +78,14 @@ def send_mail(session, mail_to: str, mail_type: str, subject: str, content: str,
             message["Subject"] = subject
             message["From"] = _sanitize_header(cfg["mail_from"])
             message["To"] = mail_to
+            if cc:
+                message["Cc"] = cc
             message.attach(MIMEText(content, "html"))
             server = smtplib.SMTP(cfg["host"], int(cfg["port"] or 587))
             server.starttls()
             server.login(cfg["user"], cfg["password"])
-            server.sendmail(cfg["mail_from"], [mail_to], message.as_string())
+            recipients = [mail_to] + ([cc] if cc else [])
+            server.sendmail(cfg["mail_from"], recipients, message.as_string())
         except Exception as e:
             status, error = "failed", str(e)[:500]
             logger.error(f"邮件发送失败 to={mail_to} type={mail_type}: {e}")
@@ -101,7 +108,7 @@ def send_mail(session, mail_to: str, mail_type: str, subject: str, content: str,
     if status != "sent":
         logger.warning(f"邮件记录 status={status} to={mail_to} type={mail_type} subject={subject}")
     else:
-        logger.info(f"邮件已发送 to={mail_to} type={mail_type} subject={subject}")
+        logger.info(f"邮件已发送 to={mail_to}{f' cc={cc}' if cc else ''} type={mail_type} subject={subject}")
     return status
 
 
@@ -120,24 +127,33 @@ _DEFAULT_BODY = (
 )
 
 # 内置默认模板：pa_mail_template 缺失/渲染异常时的回退，亦用于建表后的幂等播种。
-# 四类模板与触发时点：
+# 五类模板与触发时点：
 # - booked_student 预约成功确认（发送给学生）：学生预约成功后；
 # - booked_advisor 新预约通知（发送给顾问）：学生预约成功后；
 # - reminder 预约前一天提醒（发送给双方）：预约开始前一天 21:00 调度触发；
-# - cancelled 学生取消预约（发送给双方）：学生页面取消预约时（顾问侧取消亦复用，intro 区分）。
+# - cancelled 取消预约·学生（发送给学生）：学生页面取消预约时；
+# - cancelled_advisor 取消预约·顾问（发送给学生，抄送顾问本人）：顾问取消单条预约或取消时段时。
 DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
     "booked_student": {"subject": "【朋辈咨询】预约成功确认", "html": _DEFAULT_BODY},
     "booked_advisor": {"subject": "【朋辈咨询】新预约通知", "html": _DEFAULT_BODY},
     "reminder": {"subject": "【朋辈咨询】明日咨询提醒", "html": _DEFAULT_BODY},
     "cancelled": {"subject": "【朋辈咨询】预约取消通知", "html": _DEFAULT_BODY},
+    "cancelled_advisor": {"subject": "【朋辈咨询】预约取消通知（顾问取消）", "html": _DEFAULT_BODY},
 }
 
 
-class _SafeDict(dict):
-    """format_map 安全字典：模板引用未提供的占位符时渲染为空串而非抛 KeyError。"""
+# 只替换上下文中存在的占位符名，其余花括号（如内联样式 / <style> 块）原样保留。
+# 不用 str.format_map：CSS 里的 { color: #fff } 会被当格式说明符解析而抛异常，
+# 导致整封邮件静默回退内置默认模板（表现为「后台改了模板但不生效」）。
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
-    def __missing__(self, key: str) -> str:
-        return ""
+
+def _render_tpl(tpl: str, context: dict[str, Any]) -> str:
+    """替换 {name} 形式的已知占位符；未知占位符与非占位符花括号保持不变。"""
+    values = {k: ("" if v is None else str(v)) for k, v in context.items()}
+    return _PLACEHOLDER_RE.sub(
+        lambda m: values[m.group(1)] if m.group(1) in values else m.group(0), tpl
+    )
 
 
 def render_mail(session, mail_type: str, context: dict[str, Any]) -> tuple[str, str]:
@@ -160,10 +176,9 @@ def render_mail(session, mail_type: str, context: dict[str, Any]) -> tuple[str, 
     except Exception as e:
         logger.warning(f"邮件模板读取失败，回退默认模板 type={mail_type}: {e}")
 
-    safe = _SafeDict({k: ("" if v is None else str(v)) for k, v in context.items()})
     try:
-        return subject_tpl.format_map(safe), html_tpl.format_map(safe)
+        return _render_tpl(subject_tpl, context), _render_tpl(html_tpl, context)
     except Exception as e:
-        # 模板被改坏（如出现未转义花括号）时回退内置默认，保证通知不中断
+        # 兜底：模板异常时回退内置默认，保证通知不中断
         logger.warning(f"邮件模板渲染失败，回退默认模板 type={mail_type}: {e}")
-        return fallback["subject"].format_map(safe), fallback["html"].format_map(safe)
+        return _render_tpl(fallback["subject"], context), _render_tpl(fallback["html"], context)
